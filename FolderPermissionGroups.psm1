@@ -215,4 +215,4 @@ function Get-FolderPermissionsGroupOrphans {
 	}
 }
 
-Export-ModuleMember -Function "Add-FolderPermissions", "Get-FolderPermissionsGroupName", "New-FolderPermissionsGroup", "Set-FolderPermissionsOU", "Get-FolderPermissionsOU", "Get-FolderPermissionsGroupOrphans"
+Export-ModuleMember -Function "Add-FolderPermissions", "Get-FolderPermissionsGroupName", "New-FolderPermissionsGroup", "Set-FolderPermissionsOU", "Get-FolderPermissionsOU", "Get-FolderPermissionsGroupOrphans", "Add-FolderPermissionsGroup"

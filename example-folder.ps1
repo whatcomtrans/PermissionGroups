@@ -1,0 +1,1 @@
+﻿Add-ADGroupMember -Identity (Add-FolderPermissionsGroup -Permission RW -Path "\\wtafx\applications\CommentTracker") -Members (Get-ADGroup -Filter {Name -Like '*'} | OUt-GridView -OutputMode Multiple)
