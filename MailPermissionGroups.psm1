@@ -7,7 +7,6 @@ TODO
 #>
 
 #Shared variables
-$DirSyncHost = "SRVMSOL1"
 $PermissionsOU = "OU=PermissionGroups,DC=whatcomtrans,DC=net"
 
 <#
@@ -24,8 +23,12 @@ function New-SharedMailbox {
             [String]$Alias,
 		[Parameter(Mandatory=$true,Position=1,HelpMessage="Mailbox name")] 
             [String]$Name,
-		[Parameter(Mandatory=$true,Position=2,HelpMessage="Turn on(true)/off(false) automapping, defaults to True")] 
-            [Switch]$AutoMapping = $true
+        [Parameter(Mandatory=$true,Position=2,HelpMessage="Email address")] 
+            [String]$EmailAddress,
+		[Parameter(Mandatory=$true,Position=3,HelpMessage="Turn on(true)/off(false) automapping, defaults to True")] 
+            [Switch]$AutoMapping = $true,
+        [Parameter(Mandatory=$false,Position=4,HelpMessage="If using DirSync, specify the computername where it runs.")] 
+            [String]$DirSyncHost = ""
 	)
 	Process {
         [String] $_mailboxalias = $Alias
@@ -33,44 +36,39 @@ function New-SharedMailbox {
         [String] $_PermissionGroup = "SHMB-$_mailboxalias"
         [boolean] $_AutoMapping = $AutoMapping
         [String] $_AutoMapIdicator = ""
+        [String] $EmailDomain = ($EmailAddress.Split('@'))[1]
 
         if ($_AutoMapping) {
             $_AutoMapIdicator = "Users will be recursively AutoMapped to the account."
         }
 
         #Create security group
-        [Microsoft.ActiveDirectory.Management.ADGroup]$_newGroup = New-ADGroup -Path $PermissionsOU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description "Users and groups have FullAccess and SendAs permissions to the shared mailbox: $_mailboxalais.  $_AutoMapIndicator" -GroupScope Universal -PassThru
+        [Microsoft.ActiveDirectory.Management.ADGroup]$_newGroup = New-ADGroup -Path $PermissionsOU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description "Users and groups have FullAccess and SendAs permissions to the shared mailbox: $_mailboxalais.  $_AutoMapIndicator" -GroupScope Global -PassThru
 
         #Allow time for the change to sync in
         Sleep 30
 
-        #TODO - Make this more generic
-        Enable-SecurityGroupAsDistributionGroup -Identity $_PermissionGroup -DisplayName $_PermissionGroup -EmailAddress "$_PermissionGroup@whatcomtran.net" -Hide
+        #Change security group to distribution group
+        Enable-SecurityGroupAsDistributionGroup -Identity $_PermissionGroup -DisplayName $_PermissionGroup -EmailAddress "$_PermissionGroup@$EmailDomain" -Hide
 
         #Allow time for the change to sync in
         Sleep 30
 
-        #Force directory sync
-        #TODO - Make this more generic
-        $scb = {
-            #Force DirSync
-            Add-PSSnapin Coexistence-Configuration
-            Start-OnlineCoexistenceSync
+        #Force directory sync.  Only run if DirSyncHost defined.  This allows this module to work with or without Office365 dirsync.
+        if ($DirSyncHost.lenght -ge 1) {
+            Force-DirSync -ComputerName $DirSyncHost
+            #Allow time for the change to sync in
             Sleep 30
         }
-        Invoke-Command -ComputerName $DirSyncHost -ScriptBlock $scb
-
-        #Allow time for the change to sync in
-        Sleep 30
 
         #Create a shared mailbox
         New-Mailbox -Name $_mailboxname -Alias $_mailboxalias -Shared
-        Set-Mailbox $_mailboxalias -ProhibitSendReceiveQuota 5GB -ProhibitSendQuota 4.75GB -IssueWarningQuota 4.5GB
+        Add-ProxyAddress $_mailboxalias -ProxyAddress "$EmailAddress" -IsDefault
 
-        #TODO - Make this more generic
-        Add-ProxyAddress $_mailboxalias -ProxyAddress "$_mailboxalias@ridewta.com"
-        Add-ProxyAddress $_mailboxalias -ProxyAddress "$_mailboxalias@whatcomtrans.net" -IsDefault
-        Set-Mailbox $_mailboxalias -RoleAssignmentPolicy "WTA Users" -RetentionPolicy "WTA Primary" #-EmailAddresses "$_mailboxalias@ridewta.com", "$_mailboxalias@whatcomtrans.net", ((Get-Mailbox $_mailboxalias).EmailAddresses).toLower()
+        #TODO: Don't need the first line as these are defaults BUT, should I specify non defaults and should I do that here.
+        #      As for the second line, is that even needed or will Office365 setup defaults for me too?  TODO - test
+        #Set-Mailbox $_mailboxalias -RoleAssignmentPolicy "WTA Users" -RetentionPolicy "WTA Primary" #-EmailAddresses "$_mailboxalias@ridewta.com", "$_mailboxalias@whatcomtrans.net", ((Get-Mailbox $_mailboxalias).EmailAddresses).toLower()
+        #Set-Mailbox $_mailboxalias -ProhibitSendReceiveQuota 5GB -ProhibitSendQuota 4.75GB -IssueWarningQuota 4.5GB
 
         #Assign the security group the fullAccess permission to access the shared mailbox
         Add-MailboxPermission -Identity $_mailboxalias -User $_PermissionGroup -AccessRights FullAccess -AutoMapping:$_AutoMapping
@@ -79,7 +77,8 @@ function New-SharedMailbox {
         Add-RecipientPermission -Identity $_mailboxalias -Trustee $_PermissionGroup -AccessRights SendAs
 
         if ($_AutoMapping) {
-            Sync-SharedMailboxAutoMapping $_mailboxalias
+            #TODO - Need to implement this function
+            #Sync-SharedMailboxAutoMapping $_mailboxalias
         }
 
         return $_newGroup
