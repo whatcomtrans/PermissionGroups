@@ -1,6 +1,4 @@
-﻿
-
-<#
+﻿<#
 .SYNOPSIS
 TODO
 
@@ -52,8 +50,9 @@ function Add-FolderPermissions {
 	}
 	Process {
         Write-Verbose "Retrieving SID for AssignedTo $AssignedTo"
-        [Microsoft.ActiveDirectory.Management.ADObject] $_object = Get-ADGroup -Identity $AssignedTo -ErrorAction SilentlyContinue
-        if (!$_object) {
+        try {
+            [Microsoft.ActiveDirectory.Management.ADObject] $_object = Get-ADGroup -Identity $AssignedTo -ErrorAction SilentlyContinue
+        } catch {
             [Microsoft.ActiveDirectory.Management.ADObject] $_object = Get-ADUser -Identity $AssignedTo -ErrorAction Stop
         }
 
@@ -145,14 +144,14 @@ function New-FolderPermissionsGroup {
         #Calculate group name
         $_groupName = Get-FolderPermissionsGroupName -Permission $Permission -Path $Path
         #See if group already exists
-        $_group = Get-ADGroup -Identity $_groupName -ErrorAction Ignore 
-        if (!$_group) {
+        try {
+            $_group = Get-ADGroup -Identity $_groupName
+        } catch {
             #Create group
             [Microsoft.ActiveDirectory.Management.ADGroup] $_group = New-ADGroup -DisplayName $_groupName -SAMAccountName $_groupName -Path $_FolderPermissionsOU -Name $_groupName -GroupCategory Security -Description $Path -GroupScope Global -PassThru
-            return $_group
-        } else {
-            return $_group
         }
+
+        return $_group
 	}
 }
 
@@ -175,6 +174,8 @@ function Add-FolderPermissionsGroup {
 }
 
 function Get-FolderPermissionsOU {
+    [CmdletBinding(SupportsShouldProcess=$false)]
+	Param()
     return $_FolderPermissionsOU
 }
 
@@ -186,6 +187,42 @@ function Set-FolderPermissionsOU {
 	)
     $_FolderPermissionsOU = $OU
 }
+
+function Get-PathCommonNames {
+    [CmdletBinding(SupportsShouldProcess=$false)]
+	Param()
+    return $_shareCommonNames
+}
+
+function Set-PathCommonNames {
+    [CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="WholeHash")]
+	Param(
+		[Parameter(Mandatory=$true,ValueFromPipeline=$true,Position=0,ParameterSetName="WholeHash",HelpMessage="A hash table of path prefixs to be replaced with a friendly names in the group name.  Often used to replace a share UNC path with a friendly name.  Example, \\server\share = Users")] 
+            [System.Collections.Hashtable]$PathCommonNames,
+        [Parameter(Mandatory=$false,ValueFromPipeline=$false,Position=1,ParameterSetName="WholeHash",HelpMessage="Replace whole hash table with new one.")] 
+            [Switch]$Replace,
+        [Parameter(Mandatory=$true,ValueFromPipeline=$false,Position=0,ParameterSetName="Add",HelpMessage="Used to easily add an individual entry to the hash tabel")]
+            [switch]$Add,
+        [Parameter(Mandatory=$true,ValueFromPipeline=$false,Position=1,ParameterSetName="Add",HelpMessage="The path prefix to add.")] 
+            [String]$AddPath,
+        [Parameter(Mandatory=$true,ValueFromPipeline=$false,Position=2,ParameterSetName="Add",HelpMessage="The friendly name to replace the path prefix with in the group name.")] 
+            [String]$CommonName,
+        [Parameter(Mandatory=$true,ValueFromPipeline=$false,Position=0,ParameterSetName="Remove",HelpMessage="Used to easily add an individual entry to the hash tabel")]
+            [switch]$Remove,
+        [Parameter(Mandatory=$true,ValueFromPipeline=$false,Position=1,ParameterSetName="Remove",HelpMessage="The path prefix to add.")] 
+            [String]$RemovePath
+	)
+    if ($Replace) {
+        $_shareCommonNames = $ShareCommonNames
+    }
+    if ($Add) {
+        $_shareCommonNames.Add($AddPath, $CommonName)
+    }
+    if ($Remove) {
+        $_shareCommonNames.Remove($RemovePath)
+    }
+}
+
 
 function Get-FolderPermissionsGroupOrphans {
 	[CmdletBinding(SupportsShouldProcess=$true)]
@@ -215,4 +252,4 @@ function Get-FolderPermissionsGroupOrphans {
 	}
 }
 
-Export-ModuleMember -Function "Add-FolderPermissions", "Get-FolderPermissionsGroupName", "New-FolderPermissionsGroup", "Set-FolderPermissionsOU", "Get-FolderPermissionsOU", "Get-FolderPermissionsGroupOrphans", "Add-FolderPermissionsGroup"
+Export-ModuleMember -Function "Add-FolderPermissions", "Get-FolderPermissionsGroupName", "New-FolderPermissionsGroup", "Set-FolderPermissionsOU", "Get-FolderPermissionsOU", "Get-FolderPermissionsGroupOrphans", "Add-FolderPermissionsGroup", "Get-PathCommonNames", "Set-PathCommonNames"
