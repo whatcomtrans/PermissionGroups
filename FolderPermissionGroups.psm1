@@ -6,8 +6,12 @@ TODO
 TODO#>
 
 #Shared variables
-$_shareCommonNames = @{"\\wtafx\public" = "Public"; "\\wtafx\restricted" = "Restricted"; "\\wtafx\users" = "Users"; "\\wtafx\applications" = "Apps"}
-$_FolderPermissionsOU = "OU=FolderPermissionGroups,OU=PermissionGroups,DC=whatcomtrans,DC=net"
+$_shareCommonNames = @{}
+$_FolderPermissionsOU = ""
+
+#Remove once everything is working with parameter value defaults
+#$_shareCommonNames = @{"\\wtafx\public" = "Public"; "\\wtafx\restricted" = "Restricted"; "\\wtafx\users" = "Users"; "\\wtafx\applications" = "Apps"}
+#$_FolderPermissionsOU = "OU=FolderPermissionGroups,OU=PermissionGroups,DC=whatcomtrans,DC=net"
 
 function Add-FolderPermissions {
 	[CmdletBinding(SupportsShouldProcess=$true)]
@@ -26,6 +30,9 @@ function Add-FolderPermissions {
             [String]$Grant="Allow"
 	)
 	Begin {
+        #Load any ParameterDefaultValues
+        Set-FolderPermissionGroupSettings
+
 		switch ($Permission) {
 	            "RW" {  #Modify shorthand
 	                $_FileSystemRights = [System.Security.AccessControl.FileSystemRights] "Modify"
@@ -87,6 +94,8 @@ function Get-FolderPermissionsGroupName {
             [String]$Path
 	)
 	Begin {
+        #Load any ParameterDefaultValues
+        Set-FolderPermissionGroupSettings
 
         switch ($Permission) {
 	            "RW" {  #Modify shorthand
@@ -140,6 +149,10 @@ function New-FolderPermissionsGroup {
 		[Parameter(Mandatory=$true,ValueFromPipeline=$true,Position=1,HelpMessage="Path to set permission on.")] 
             [String]$Path
 	)
+    Begin {
+        #Load any ParameterDefaultValues
+        Set-FolderPermissionGroupSettings
+    }
 	Process {
         #Calculate group name
         $_groupName = Get-FolderPermissionsGroupName -Permission $Permission -Path $Path
@@ -163,6 +176,10 @@ function Add-FolderPermissionsGroup {
 		[Parameter(Mandatory=$true,ValueFromPipeline=$true,Position=1,HelpMessage="Path to set permission on.")] 
             [String]$Path
 	)
+    Begin {
+        #Load any ParameterDefaultValues
+        Set-FolderPermissionGroupSettings
+    }
 	Process {
         #TODO - Test to see if it already exists
         #Create group
@@ -171,6 +188,22 @@ function Add-FolderPermissionsGroup {
         Add-FolderPermissions -Permission $Permission -Path $Path -AssignedTo $_group.SAMAccountName
         return $_group
 	}
+}
+
+function Set-FolderPermissionGroupSettings {
+    [CmdletBinding(SupportsShouldProcess=$true)]
+	Param(
+		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0,HelpMessage="OU (complete path) to place newly created Folder Permissions Groups in.")] 
+            [String]$OU,
+		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0,HelpMessage="A hash table of path prefixs to be replaced with a friendly names in the group name.  Often used to replace a share UNC path with a friendly name.  Example, \\server\share = Users")] 
+            [System.Collections.Hashtable]$PathCommonNames
+    )
+    if ($OU) {
+        Set-FolderPermissionsOU $OU
+    }
+    if ($PathCommonNames) {
+        Set-PathCommonNames $PathCommonNames
+    }
 }
 
 function Get-FolderPermissionsOU {
@@ -227,7 +260,11 @@ function Set-PathCommonNames {
 function Get-FolderPermissionsGroupOrphans {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param()
-	Process {
+	Begin {
+        #Load any ParameterDefaultValues
+        Set-FolderPermissionGroupSettings
+    }
+    Process {
         #Get array of Folder Permission Groups
         $_groups = Get-ADGroup -Filter "Name -like 'FLDR-*'" -Properties Description
         foreach ($_group in $_groups) {
@@ -252,4 +289,4 @@ function Get-FolderPermissionsGroupOrphans {
 	}
 }
 
-Export-ModuleMember -Function "Add-FolderPermissions", "Get-FolderPermissionsGroupName", "New-FolderPermissionsGroup", "Set-FolderPermissionsOU", "Get-FolderPermissionsOU", "Get-FolderPermissionsGroupOrphans", "Add-FolderPermissionsGroup", "Get-PathCommonNames", "Set-PathCommonNames"
+Export-ModuleMember -Function "Add-FolderPermissions", "Get-FolderPermissionsGroupName", "New-FolderPermissionsGroup", "Set-FolderPermissionsOU", "Get-FolderPermissionsOU", "Get-FolderPermissionsGroupOrphans", "Add-FolderPermissionsGroup", "Get-PathCommonNames", "Set-PathCommonNames", "Set-FolderPermissionGroupSettings"

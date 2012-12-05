@@ -6,9 +6,6 @@ TODO
 TODO
 #>
 
-#Shared variables
-$PermissionsOU = "OU=PermissionGroups,DC=whatcomtrans,DC=net"
-
 <#
 .SYNOPSIS
 TODO
@@ -27,7 +24,9 @@ function New-SharedMailbox {
             [String]$EmailAddress,
 		[Parameter(Mandatory=$true,Position=3,HelpMessage="Turn on(true)/off(false) automapping, defaults to True")] 
             [Switch]$AutoMapping = $true,
-        [Parameter(Mandatory=$false,Position=4,HelpMessage="If using DirSync, specify the computername where it runs.")] 
+        [Parameter(Mandatory=$false,Position=4,HelpMessage="The OU where the permissions groups will be created")] 
+            [String]$PermissionsOU = "",
+        [Parameter(Mandatory=$false,Position=5,HelpMessage="If using DirSync, specify the computername where it runs")] 
             [String]$DirSyncHost = ""
 	)
 	Process {
