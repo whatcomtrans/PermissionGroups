@@ -5,13 +5,6 @@ TODO
 .EXAMPLE
 TODO#>
 
-#Shared variables
-$_shareCommonNames = @{}
-$_FolderPermissionsOU = ""
-
-#Remove once everything is working with parameter value defaults
-#$_shareCommonNames = @{"\\wtafx\public" = "Public"; "\\wtafx\restricted" = "Restricted"; "\\wtafx\users" = "Users"; "\\wtafx\applications" = "Apps"}
-#$_FolderPermissionsOU = "OU=FolderPermissionGroups,OU=PermissionGroups,DC=whatcomtrans,DC=net"
 
 function Add-FolderPermissions {
 	[CmdletBinding(SupportsShouldProcess=$true)]
@@ -30,9 +23,6 @@ function Add-FolderPermissions {
             [String]$Grant="Allow"
 	)
 	Begin {
-        #Load any ParameterDefaultValues
-        Set-FolderPermissionGroupSettings
-
 		switch ($Permission) {
 	            "RW" {  #Modify shorthand
 	                $_FileSystemRights = [System.Security.AccessControl.FileSystemRights] "Modify"
@@ -91,12 +81,11 @@ function Get-FolderPermissionsGroupName {
 		[Parameter(Mandatory=$true,Position=0,HelpMessage="Permission (RW,RO,LO, or a FileSystemRights Enumeration value, see http://msdn.microsoft.com/en-us/library/system.security.accesscontrol.filesystemrights.aspx)")] 
             [String]$Permission,
 		[Parameter(Mandatory=$true,ValueFromPipeline=$true,Position=1,HelpMessage="Path to set permission on.")] 
-            [String]$Path
+            [String]$Path,
+		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0,HelpMessage="A hash table of path prefixs to be replaced with a friendly names in the group name.  Often used to replace a share UNC path with a friendly name.  Example, \\server\share = Users")] 
+            [System.Collections.Hashtable]$PathCommonNames
 	)
 	Begin {
-        #Load any ParameterDefaultValues
-        Set-FolderPermissionGroupSettings
-
         switch ($Permission) {
 	            "RW" {  #Modify shorthand
 	                $_PermissionAbreviation = "RW"
@@ -120,9 +109,9 @@ function Get-FolderPermissionsGroupName {
 	Process {
         $_permissiongroup = $Path
         #Calculate group name
-        foreach ($_commonPath in $_shareCommonNames.keys) {
+        foreach ($_commonPath in $PathCommonNames.keys) {
 	        if ($Path.StartsWith($_commonPath) -eq $true) {
-		        $_permissiongroup = $_shareCommonNames.$_commonPath + $_permissiongroup.Replace($_commonPath, "")
+		        $_permissiongroup = $PathCommonNames.$_commonPath + $_permissiongroup.Replace($_commonPath, "")
 	        }
         }
         $_permissiongroup = $_permissiongroup.Replace("\\", "\").Replace("\", "-").Replace(" ", "_").Replace(":", "-")
@@ -147,21 +136,21 @@ function New-FolderPermissionsGroup {
 		[Parameter(Mandatory=$true,Position=0,HelpMessage="Permission (RW,RO,LO, or a FileSystemRights Enumeration value, see http://msdn.microsoft.com/en-us/library/system.security.accesscontrol.filesystemrights.aspx)")] 
             [String]$Permission,
 		[Parameter(Mandatory=$true,ValueFromPipeline=$true,Position=1,HelpMessage="Path to set permission on.")] 
-            [String]$Path
+            [String]$Path,
+   		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0,HelpMessage="OU (complete path) to place newly created Folder Permissions Groups in.")] 
+            [String]$OU,
+		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0,HelpMessage="A hash table of path prefixs to be replaced with a friendly names in the group name.  Often used to replace a share UNC path with a friendly name.  Example, \\server\share = Users")] 
+            [System.Collections.Hashtable]$PathCommonNames
 	)
-    Begin {
-        #Load any ParameterDefaultValues
-        Set-FolderPermissionGroupSettings
-    }
 	Process {
         #Calculate group name
-        $_groupName = Get-FolderPermissionsGroupName -Permission $Permission -Path $Path
+        $_groupName = Get-FolderPermissionsGroupName -Permission $Permission -Path $Path -PathCommonNames $PathCommonNames
         #See if group already exists
         try {
             $_group = Get-ADGroup -Identity $_groupName
         } catch {
             #Create group
-            [Microsoft.ActiveDirectory.Management.ADGroup] $_group = New-ADGroup -DisplayName $_groupName -SAMAccountName $_groupName -Path $_FolderPermissionsOU -Name $_groupName -GroupCategory Security -Description $Path -GroupScope Global -PassThru
+            [Microsoft.ActiveDirectory.Management.ADGroup] $_group = New-ADGroup -DisplayName $_groupName -SAMAccountName $_groupName -Path $OU -Name $_groupName -GroupCategory Security -Description $Path -GroupScope Global -PassThru
         }
 
         return $_group
@@ -174,96 +163,25 @@ function Add-FolderPermissionsGroup {
 		[Parameter(Mandatory=$true,Position=0,HelpMessage="Permission (RW,RO,LO, or a FileSystemRights Enumeration value, see http://msdn.microsoft.com/en-us/library/system.security.accesscontrol.filesystemrights.aspx)")] 
             [String]$Permission,
 		[Parameter(Mandatory=$true,ValueFromPipeline=$true,Position=1,HelpMessage="Path to set permission on.")] 
-            [String]$Path
+            [String]$Path,
+   		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0,HelpMessage="OU (complete path) to place newly created Folder Permissions Groups in.")] 
+            [String]$OU,
+		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0,HelpMessage="A hash table of path prefixs to be replaced with a friendly names in the group name.  Often used to replace a share UNC path with a friendly name.  Example, \\server\share = Users")] 
+            [System.Collections.Hashtable]$PathCommonNames
 	)
-    Begin {
-        #Load any ParameterDefaultValues
-        Set-FolderPermissionGroupSettings
-    }
 	Process {
         #TODO - Test to see if it already exists
         #Create group
-        [Microsoft.ActiveDirectory.Management.ADGroup] $_group = New-FolderPermissionsGroup -Permission $Permission -Path $Path
+        [Microsoft.ActiveDirectory.Management.ADGroup] $_group = New-FolderPermissionsGroup -Permission $Permission -Path $Path -OU $OU -PathCommonNames $PathCommonNames
         #Set folder permissions using group
         Add-FolderPermissions -Permission $Permission -Path $Path -AssignedTo $_group.SAMAccountName
         return $_group
 	}
 }
 
-function Set-FolderPermissionGroupSettings {
-    [CmdletBinding(SupportsShouldProcess=$true)]
-	Param(
-		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0,HelpMessage="OU (complete path) to place newly created Folder Permissions Groups in.")] 
-            [String]$OU,
-		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=0,HelpMessage="A hash table of path prefixs to be replaced with a friendly names in the group name.  Often used to replace a share UNC path with a friendly name.  Example, \\server\share = Users")] 
-            [System.Collections.Hashtable]$PathCommonNames
-    )
-    if ($OU) {
-        Set-FolderPermissionsOU $OU
-    }
-    if ($PathCommonNames) {
-        Set-PathCommonNames $PathCommonNames
-    }
-}
-
-function Get-FolderPermissionsOU {
-    [CmdletBinding(SupportsShouldProcess=$false)]
-	Param()
-    return $_FolderPermissionsOU
-}
-
-function Set-FolderPermissionsOU {
-    [CmdletBinding(SupportsShouldProcess=$true)]
-	Param(
-		[Parameter(Mandatory=$true,ValueFromPipeline=$true,Position=0,HelpMessage="OU (complete path) to place newly created Folder Permissions Groups in.")] 
-            [String]$OU
-	)
-    $_FolderPermissionsOU = $OU
-}
-
-function Get-PathCommonNames {
-    [CmdletBinding(SupportsShouldProcess=$false)]
-	Param()
-    return $_shareCommonNames
-}
-
-function Set-PathCommonNames {
-    [CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="WholeHash")]
-	Param(
-		[Parameter(Mandatory=$true,ValueFromPipeline=$true,Position=0,ParameterSetName="WholeHash",HelpMessage="A hash table of path prefixs to be replaced with a friendly names in the group name.  Often used to replace a share UNC path with a friendly name.  Example, \\server\share = Users")] 
-            [System.Collections.Hashtable]$PathCommonNames,
-        [Parameter(Mandatory=$false,ValueFromPipeline=$false,Position=1,ParameterSetName="WholeHash",HelpMessage="Replace whole hash table with new one.")] 
-            [Switch]$Replace,
-        [Parameter(Mandatory=$true,ValueFromPipeline=$false,Position=0,ParameterSetName="Add",HelpMessage="Used to easily add an individual entry to the hash tabel")]
-            [switch]$Add,
-        [Parameter(Mandatory=$true,ValueFromPipeline=$false,Position=1,ParameterSetName="Add",HelpMessage="The path prefix to add.")] 
-            [String]$AddPath,
-        [Parameter(Mandatory=$true,ValueFromPipeline=$false,Position=2,ParameterSetName="Add",HelpMessage="The friendly name to replace the path prefix with in the group name.")] 
-            [String]$CommonName,
-        [Parameter(Mandatory=$true,ValueFromPipeline=$false,Position=0,ParameterSetName="Remove",HelpMessage="Used to easily add an individual entry to the hash tabel")]
-            [switch]$Remove,
-        [Parameter(Mandatory=$true,ValueFromPipeline=$false,Position=1,ParameterSetName="Remove",HelpMessage="The path prefix to add.")] 
-            [String]$RemovePath
-	)
-    if ($Replace) {
-        $_shareCommonNames = $ShareCommonNames
-    }
-    if ($Add) {
-        $_shareCommonNames.Add($AddPath, $CommonName)
-    }
-    if ($Remove) {
-        $_shareCommonNames.Remove($RemovePath)
-    }
-}
-
-
 function Get-FolderPermissionsGroupOrphans {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param()
-	Begin {
-        #Load any ParameterDefaultValues
-        Set-FolderPermissionGroupSettings
-    }
     Process {
         #Get array of Folder Permission Groups
         $_groups = Get-ADGroup -Filter "Name -like 'FLDR-*'" -Properties Description
@@ -289,4 +207,4 @@ function Get-FolderPermissionsGroupOrphans {
 	}
 }
 
-Export-ModuleMember -Function "Add-FolderPermissions", "Get-FolderPermissionsGroupName", "New-FolderPermissionsGroup", "Set-FolderPermissionsOU", "Get-FolderPermissionsOU", "Get-FolderPermissionsGroupOrphans", "Add-FolderPermissionsGroup", "Get-PathCommonNames", "Set-PathCommonNames", "Set-FolderPermissionGroupSettings"
+Export-ModuleMember -Function "Add-FolderPermissions", "Get-FolderPermissionsGroupName", "New-FolderPermissionsGroup", "Set-FolderPermissionsOU", "Get-FolderPermissionsOU", "Get-FolderPermissionsGroupOrphans", "Add-FolderPermissionsGroup"
