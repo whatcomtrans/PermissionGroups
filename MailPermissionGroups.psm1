@@ -156,4 +156,4 @@ function Verb-Noun {
 }
 #>
 
-Export-ModuleMember -Function "New-SharedMailbox" #TODO "Verb-Noun"
+Export-ModuleMember -Function "New-SharedMailbox" "Sync-SharedMailboxAutoMapping" #TODO "Verb-Noun"
