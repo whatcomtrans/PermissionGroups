@@ -8,7 +8,7 @@ TODO
 
 <#
 .SYNOPSIS
-TODO
+Creates a new shared mailbox and an associated FullAccess group to manage access.
 
 .EXAMPLE
 TODO
@@ -42,7 +42,8 @@ function New-SharedMailbox {
         }
 
         #Create security group
-        [Microsoft.ActiveDirectory.Management.ADGroup]$_newGroup = New-ADGroup -Path $PermissionsOU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description "Users and groups have FullAccess and SendAs permissions to the shared mailbox: $_mailboxalais.  $_AutoMapIndicator" -GroupScope Global -PassThru
+        $_GroupDescription = "Users and groups have FullAccess and SendAs permissions to the shared mailbox: $_mailboxalias .  $_AutoMapIdicator"
+        [Microsoft.ActiveDirectory.Management.ADGroup]$_newGroup = New-ADGroup -Path $PermissionsOU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description $_GroupDescription -GroupScope Global -PassThru
 
         #Allow time for the change to sync in
         Sleep 30
@@ -73,12 +74,7 @@ function New-SharedMailbox {
         Add-MailboxPermission -Identity $_mailboxalias -User $_PermissionGroup -AccessRights FullAccess -AutoMapping:$_AutoMapping
 
         #Assign the security gorup the SendAs permission to the shared mailbox
-        Add-RecipientPermission -Identity $_mailboxalias -Trustee $_PermissionGroup -AccessRights SendAs
-
-        if ($_AutoMapping) {
-            #TODO - Need to implement this function
-            #Sync-SharedMailboxAutoMapping $_mailboxalias
-        }
+        Add-RecipientPermission -Identity $_mailboxalias -Trustee $_PermissionGroup -AccessRights SendAs -Confirm:$false
 
         return $_newGroup
         #Done
@@ -87,32 +83,42 @@ function New-SharedMailbox {
 
 <#
 .SYNOPSIS
-TODO
+Syncronizes a shared (or really any) mailbox's permissions so that members of groups assigned to the mailbox when are setup for AutoMapping are added directly to the permissions list with FullAccess.
 
 .EXAMPLE
-TODO
+Sync-SharedMailboxAutoMapping IT@contosu.com
 #>
 function Sync-SharedMailboxAutoMapping {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param(
 		[Parameter(Mandatory=$true,Position=0,HelpMessage="Mailbox identity")] 
-            [String]$Identity<#,
-		[Parameter(Mandatory=$true,ValueFromPipeline=$true,Position=1,HelpMessage="Path to set permission on.")] 
-            [String]$Path,
-		[Parameter(Mandatory=$true,Position=2,HelpMessage="Name of user or group to assign permission to.")] 
-            [String]$AssignedTo,
-		[Parameter(Mandatory=$false,Position=3,HelpMessage="Determine how this rule is inherited by child objects.  Values are None, ContainerInherit, ObjectInherit or some combination of these values in a comma seperated string.  Default is ContainerInherit, ObjectInherit.  See http://msdn.microsoft.com/en-us/magazine/cc163885.aspx#S3")] 
-            [String]$InheritanceFlags="ContainerInherit, ObjectInherit",
-		[Parameter(Mandatory=$false,Position=4,HelpMessage="Determine how inheritance of this rule is propagated to child objects.  Values are None, NoPropagateInherit and InheritOnly or some combination of these values in a comma seperated string.  Default is None.  See http://msdn.microsoft.com/en-us/magazine/cc163885.aspx#S3")] 
-            [String]$PropagationFlags="None",
-		[Parameter(Mandatory=$false,Position=5,HelpMessage="Whether to Allow or Deny the permission, defaults to Allow")] [ValidateSet("Allow","Deny")] 
-            [String]$Grant="Allow"#>
+            [String]$Identity
 	)
-	Begin {
-		#TODO
-	}
 	Process {
-        #TODO
+        #TODO - Modify comparison process to handle access other then FullAccess
+        
+        #Step 1:  Get the SHMB groups associated with the mailbox
+        $_SHMBGroups = ((Get-MailboxPermission $Identity | Where-Object -Property IsInherited -EQ -Value $false).User | Get-DistributionGroup  -ErrorAction SilentlyContinue).Name
+
+        foreach ($_SHMBGroup in $_SHMBGroups) {
+            #Step 2:  Verify the group is set to AutoMapping by checking description by -like "* AutoMapped *"
+            if ((Get-ADGroup $_SHMBGroup -Properties Description).Description -like "* AutoMapped *") {
+                #Step 3:  Get the users in the group
+                $_PermissionGroupUsers = ((Get-ADGroupMember -Identity $_SHMBGroup -Recursive) | Where-Object -Property objectClass -EQ -Value user).SamAccountName
+            }
+        }
+
+        #Step 4:  Get the users already assigned permissions
+        $_ExistingUsers = ((Get-MailboxPermission $Identity).User | Get-Mailbox -ErrorAction SilentlyContinue).Alias
+
+        #Step 5:  Compare Lists
+        $_Comparison = Compare-Object -ReferenceObject $_PermissionGroupUsers -DifferenceObject $_ExistingUsers -IncludeEqual
+
+        #Step 6:  Remove users
+        ($_Comparison | Where-Object -Property SideIndicator -EQ -Value "=>").InputObject | ForEach-Object {$_UserMBPermission = Get-MailboxPermission -Identity $Identity -User $_; Remove-MailboxPermission -Identity $_UserMBPermission.Identity -User $_UserMBPermission.User -AccessRights $_UserMBPermission.AccessRights -Confirm:$False}
+
+        #Step 7:  Add users
+        ($_Comparison | Where-Object -Property SideIndicator -EQ -Value "<=").InputObject | ForEach-Object {Add-MailboxPermission -Identity $Identity -User $_ -AccessRights FullAccess -AutoMapping:$true -Confirm:$false}
 	}
 }
 #>
