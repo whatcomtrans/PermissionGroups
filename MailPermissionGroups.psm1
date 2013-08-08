@@ -16,13 +16,11 @@ TODO
 function New-SharedMailbox {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param(
-		[Parameter(Mandatory=$true,Position=0,HelpMessage="Mailbox alias")] 
-            [String]$Alias,
 		[Parameter(Mandatory=$true,Position=1,HelpMessage="Mailbox name")] 
             [String]$Name,
         [Parameter(Mandatory=$true,Position=2,HelpMessage="Email address")] 
             [String]$EmailAddress,
-		[Parameter(Mandatory=$true,Position=3,HelpMessage="Turn on(true)/off(false) automapping, defaults to True")] 
+		[Parameter(Mandatory=$false,Position=3,HelpMessage="Turn on(true)/off(false) automapping, defaults to True")] 
             [Switch]$AutoMapping = $true,
         [Parameter(Mandatory=$false,Position=4,HelpMessage="Optional array of members to add (accepts same objects as Add-ADGroupMember)")] 
             [Object[]] $Members,
@@ -32,53 +30,16 @@ function New-SharedMailbox {
             [String]$DirSyncHost = ""
 	)
 	Process {
-        [String] $_mailboxalias = $Alias
-        [String] $_mailboxname = $Name
-        [String] $_PermissionGroup = "SHMB-" + $_mailboxalias + "-" + $Permissions
-        [boolean] $_AutoMapping = $AutoMapping
-        [String] $_AutoMapIdicator = ""
-        [String] $EmailDomain = ($EmailAddress.Split('@'))[1]
-
-        if ($_AutoMapping) {
-            $_AutoMapIdicator = "Users will be recursively AutoMapped to the account."
-        }
-
-        #Create security group
-        $_GroupDescription = "Users and groups have FullAccess and SendAs permissions to the shared mailbox: $_mailboxalias .  $_AutoMapIdicator"
-        [Microsoft.ActiveDirectory.Management.ADGroup]$_newGroup = New-ADGroup -Path $PermissionsOU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description $_GroupDescription -GroupScope Global -PassThru
-
-        #Allow time for the change to sync in
-        Sleep 30
-
-        #Change security group to distribution group
-        Enable-SecurityGroupAsDistributionGroup -Identity $_PermissionGroup -DisplayName $_PermissionGroup -EmailAddress "$_PermissionGroup@$EmailDomain" -Hide
-
-        #Allow time for the change to sync in
-        Sleep 30
-
-        #Force directory sync.  Only run if DirSyncHost defined.  This allows this module to work with or without Office365 dirsync.
-        if ($DirSyncHost.lenght -ge 1) {
-            Force-DirSync -ComputerName $DirSyncHost
-            #Allow time for the change to sync in
-            Sleep 30
-        }
+        #Determine alias from email address
+        [String]$Alias = $EmailAddress.Split("@")[0]
 
         #Create a shared mailbox
-        New-Mailbox -Name $_mailboxname -Alias $_mailboxalias -Shared
-        Add-ProxyAddress $_mailboxalias -ProxyAddress "$EmailAddress" -IsDefault
+        New-Mailbox -Name $Name -Alias $Alias -Shared
+        Add-ProxyAddress $Alias -ProxyAddress "$EmailAddress" -IsDefault
 
-        #TODO: Don't need the first line as these are defaults BUT, should I specify non defaults and should I do that here.
-        #      As for the second line, is that even needed or will Office365 setup defaults for me too?  TODO - test
-        #Set-Mailbox $_mailboxalias -RoleAssignmentPolicy "WTA Users" -RetentionPolicy "WTA Primary" #-EmailAddresses "$_mailboxalias@ridewta.com", "$_mailboxalias@whatcomtrans.net", ((Get-Mailbox $_mailboxalias).EmailAddresses).toLower()
-        #Set-Mailbox $_mailboxalias -ProhibitSendReceiveQuota 5GB -ProhibitSendQuota 4.75GB -IssueWarningQuota 4.5GB
+        #Create and associate group
+        return (Add-SharedMailboxGroup -Identity $Name -Permissions "FullAccess" -AutoMapping:$AutoMapping -Members $Members -PermissionsOU $PermissionsOU -DirSyncHost $DirSyncHost) #TODO - Need to add additional parameters
 
-        #Assign the security group the fullAccess permission to access the shared mailbox
-        Add-MailboxPermission -Identity $_mailboxalias -User $_PermissionGroup -AccessRights FullAccess -AutoMapping:$_AutoMapping
-
-        #Assign the security gorup the SendAs permission to the shared mailbox
-        Add-RecipientPermission -Identity $_mailboxalias -Trustee $_PermissionGroup -AccessRights SendAs -Confirm:$false
-
-        return $_newGroup
         #Done
 	}
 }
@@ -100,6 +61,7 @@ function Sync-SharedMailboxAutoMapping {
         #TODO - Modify comparison process to handle access other then FullAccess
         #TODO - Also, this assumes the only users directly mapped will be AutoMapped
         #TODO - Add support for confirm and whatif
+        $doConfirm = $false
         #TODO - I am still not confident I have tested every scenario and until I get the above TODO implemented, all changes REQUIRE confirmation
         
         [String[]]$_PermissionGroupUsers = $null
@@ -128,23 +90,23 @@ function Sync-SharedMailboxAutoMapping {
 
                 #Step 6:  Remove users
                 if (($_Comparison | Where-Object -Property SideIndicator -EQ -Value "=>" | Measure-Object).Count -gt 0) {
-                    ($_Comparison | Where-Object -Property SideIndicator -EQ -Value "=>").InputObject | ForEach-Object {$_UserMBPermissions = Get-MailboxPermission -Identity $Identity -User $_; $_UserMBPermissions | ForEach-Object {Remove-MailboxPermission -Identity $_.Identity -User $_.User -AccessRights $_.AccessRights -Confirm:$true}}
+                    ($_Comparison | Where-Object -Property SideIndicator -EQ -Value "=>").InputObject | ForEach-Object {$_UserMBPermissions = Get-MailboxPermission -Identity $Identity -User $_; $_UserMBPermissions | ForEach-Object {Remove-MailboxPermission -Identity $_.Identity -User $_.User -AccessRights $_.AccessRights -Confirm:$doConfirm}}
                 }
 
                 #Step 7:  Add users
                 if (($_Comparison | Where-Object -Property SideIndicator -EQ -Value "<=" | Measure-Object).Count -gt 0) {
-                    ($_Comparison | Where-Object -Property SideIndicator -EQ -Value "<=").InputObject | ForEach-Object {Add-MailboxPermission -Identity $Identity -User $_ -AccessRights FullAccess -AutoMapping:$true -Confirm:$true}
+                    ($_Comparison | Where-Object -Property SideIndicator -EQ -Value "<=").InputObject | ForEach-Object {Add-MailboxPermission -Identity $Identity -User $_ -AccessRights FullAccess -AutoMapping:$true -Confirm:$doConfirm}
                 }
             } else {
                 #Step 6:  Remove users
 
                 if ($_ExistingUsers.Count -gt 0) {
-                    $_ExistingUsers | ForEach-Object {$_UserMBPermissions = Get-MailboxPermission -Identity $Identity -User $_; $_UserMBPermissions | ForEach-Object {Remove-MailboxPermission -Identity $_.Identity -User $_.User -AccessRights $_.AccessRights -Confirm:$true}}
+                    $_ExistingUsers | ForEach-Object {$_UserMBPermissions = Get-MailboxPermission -Identity $Identity -User $_; $_UserMBPermissions | ForEach-Object {Remove-MailboxPermission -Identity $_.Identity -User $_.User -AccessRights $_.AccessRights -Confirm:$doConfirm}}
                 }
 
                 #Step 7:  Add users
                 if ($_PermissionGroupUsers.Count -gt 0) {
-                    $_PermissionGroupUsers | ForEach-Object {Add-MailboxPermission -Identity $Identity -User $_ -AccessRights FullAccess -AutoMapping:$true -Confirm:$true}
+                    $_PermissionGroupUsers | ForEach-Object {Add-MailboxPermission -Identity $Identity -User $_ -AccessRights FullAccess -AutoMapping:$true -Confirm:$doConfirm}
                 }
             }
 
@@ -180,7 +142,10 @@ function Add-SharedMailboxGroup {
             [String]$DirSyncHost = ""
 	)
 	Process {
-        [String] $_PermissionGroup = "SHMB-" + $_mailboxalias + "-" + $Permissions
+        #TODO - Add support for confirm and whatif
+        $doConfirm = $false
+        
+        [String] $_PermissionGroup = "SHMB-" + $Identity + "-" + $Permissions
         [boolean] $_AutoMapping = $AutoMapping
         [String] $_AutoMapIdicator = ""
 
@@ -189,41 +154,41 @@ function Add-SharedMailboxGroup {
         }
 
         #Create security group
-        $_GroupDescription = "Users and groups have FullAccess and SendAs permissions to the shared mailbox: $_mailboxalias .  $_AutoMapIdicator"
+        $_GroupDescription = "Users and groups have FullAccess and SendAs permissions to the shared mailbox: $Identity .  $_AutoMapIdicator"
         [Microsoft.ActiveDirectory.Management.ADGroup]$_newGroup = New-ADGroup -Path $PermissionsOU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description $_GroupDescription -GroupScope Global -PassThru
 
         #Allow time for the change to sync in AD
-        Sleep 30
+        Sleep 15
 
         #Force directory sync.  Only run if DirSyncHost defined.  This allows this module to work with or without Office365 dirsync.
-        if ($DirSyncHost.lenght -ge 1) {
+        if ($DirSyncHost.Length -ge 1) {
             Force-DirSync -ComputerName $DirSyncHost
             #Allow time for the change to sync in Office365
-            Sleep 30
+            Sleep 60
         }
 
         #Get mailbox so I can get email address for distribution group
         [String] $EmailDomain = (((Get-Mailbox $Identity).PrimarySMTPAddress).Split('@'))[1]
 
         #Change security group to distribution group
-        Enable-SecurityGroupAsDistributionGroup -Identity $_PermissionGroup -DisplayName $_PermissionGroup -EmailAddress "$_PermissionGroup@$EmailDomain" -Hide
+        Enable-SecurityGroupAsDistributionGroup -Identity $_PermissionGroup -DisplayName $_PermissionGroup -EmailAddress "$_PermissionGroup@$EmailDomain" -Hide -Confirm:$doConfirm
 
         #Allow time for the change to sync in AD
-        Sleep 30
+        Sleep 15
 
         #Force directory sync.  Only run if DirSyncHost defined.  This allows this module to work with or without Office365 dirsync.
-        if ($DirSyncHost.lenght -ge 1) {
+        if ($DirSyncHost.Length -ge 1) {
             Force-DirSync -ComputerName $DirSyncHost
             #Allow time for the change to sync in Office365
-            Sleep 30
+            Sleep 60
         }
 
         #Assign the security group the fullAccess permission to access the shared mailbox
-        Add-MailboxPermission -Identity $Identity -User $_PermissionGroup -AccessRights $Permissions -AutoMapping:$_AutoMapping
+        Add-MailboxPermission -Identity $Identity -User $_PermissionGroup -AccessRights $Permissions -AutoMapping:$_AutoMapping -Confirm:$doConfirm
 
         If ($Permissions -eq "FullAccess") { 
             #Assign the security gorup the SendAs permission to the shared mailbox
-            Add-RecipientPermission -Identity $Identity -Trustee $_PermissionGroup -AccessRights SendAs -Confirm:$false
+            Add-RecipientPermission -Identity $Identity -Trustee $_PermissionGroup -AccessRights SendAs -Confirm:$doConfirm
         }
 
         if ($Members) {
@@ -234,10 +199,10 @@ function Add-SharedMailboxGroup {
             Sleep 30
 
             #Force directory sync.  Only run if DirSyncHost defined.  This allows this module to work with or without Office365 dirsync.
-            if ($DirSyncHost.lenght -ge 1) {
+            if ($DirSyncHost.Length -ge 1) {
                 Force-DirSync -ComputerName $DirSyncHost
                 #Allow time for the change to sync in Office365
-                Sleep 30
+                Sleep 60
             }
 
             if ($_AutoMapping) {
@@ -283,4 +248,4 @@ function Verb-Noun {
 }
 #>
 
-Export-ModuleMember -Function "New-SharedMailbox","Sync-SharedMailboxAutoMapping" #TODO "Verb-Noun"
+Export-ModuleMember -Function "New-SharedMailbox","Sync-SharedMailboxAutoMapping","Add-SharedMailboxGroup" #TODO "Verb-Noun"
