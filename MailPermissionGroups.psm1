@@ -22,9 +22,9 @@ function New-SharedMailbox {
             [String]$EmailAddress,
 		[Parameter(Mandatory=$false,Position=3,HelpMessage="Turn on(true)/off(false) automapping, defaults to True")] 
             [Switch]$AutoMapping = $true,
-        [Parameter(Mandatory=$false,Position=4,HelpMessage="Optional array of members to add (accepts same objects as Add-ADGroupMember)")] 
+        [Parameter(Mandatory=$false, ValueFromPipeline=$true, Position=4,HelpMessage="Optional array of members to add (accepts same objects as Add-ADGroupMember)")] 
             [Object[]] $Members,
-        [Parameter(Mandatory=$false,Position=5,HelpMessage="The OU where the permissions groups will be created")] 
+        [Parameter(Mandatory=$true,Position=5,HelpMessage="The OU where the permissions groups will be created")] 
             [String]$PermissionsOU = "",
         [Parameter(Mandatory=$false,Position=6,HelpMessage="If using DirSync, specify the computername where it runs")] 
             [String]$DirSyncHost = ""
@@ -38,7 +38,11 @@ function New-SharedMailbox {
         Add-ProxyAddress $Alias -ProxyAddress "$EmailAddress" -IsDefault
 
         #Create and associate group
-        return (Add-SharedMailboxGroup -Identity $Name -Permissions "FullAccess" -AutoMapping:$AutoMapping -Members $Members -PermissionsOU $PermissionsOU -DirSyncHost $DirSyncHost) #TODO - Need to add additional parameters
+        if (!$Members) {
+            return (Add-SharedMailboxGroup -Identity $Name -Permissions "FullAccess" -AutoMapping:$AutoMapping -PermissionsOU $PermissionsOU -DirSyncHost $DirSyncHost) #TODO - Need to add additional parameters
+        } else {
+            return (Add-SharedMailboxGroup -Identity $Name -Permissions "FullAccess" -AutoMapping:$AutoMapping -Members $Members -PermissionsOU $PermissionsOU -DirSyncHost $DirSyncHost) #TODO - Need to add additional parameters
+        }
 
         #Done
 	}
@@ -54,7 +58,7 @@ Sync-SharedMailboxAutoMapping IT@contosu.com
 function Sync-SharedMailboxAutoMapping {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param(
-		[Parameter(Mandatory=$true,Position=0,HelpMessage="Mailbox identity")] 
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipelineByPropertyName=$True,HelpMessage="Mailbox identity")] 
             [Object]$Identity
 	)
 	Process {
@@ -128,15 +132,15 @@ TODO
 function Add-SharedMailboxGroup {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param(
-		[Parameter(Mandatory=$true,Position=0,HelpMessage="Mailbox Identity")] 
-            [Object]$Identity,
-        [Parameter(Mandatory=$true,Position=1,HelpMessage="Permissions")] 
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipelineByPropertyName=$True,HelpMessage="Mailbox Identity")] 
+            [String]$Identity,
+        [Parameter(Mandatory=$false,Position=1,HelpMessage="Permissions")] 
             [String]$Permissions = "FullAccess",
-		[Parameter(Mandatory=$true,Position=2,HelpMessage="Turn on(true)/off(false) automapping, defaults to True")] 
+		[Parameter(Mandatory=$false,Position=2,HelpMessage="Turn on(true)/off(false) automapping, defaults to True")] 
             [Switch]$AutoMapping = $true,
         [Parameter(Mandatory=$false,Position=3,HelpMessage="Optional array of members to add (accepts same objects as Add-ADGroupMember)")] 
             [Object[]] $Members,
-        [Parameter(Mandatory=$false,Position=4,HelpMessage="The OU where the permissions groups will be created")] 
+        [Parameter(Mandatory=$true,Position=4,HelpMessage="The OU where the permissions groups will be created")] 
             [String]$PermissionsOU = "",
         [Parameter(Mandatory=$false,Position=5,HelpMessage="If using DirSync, specify the computername where it runs")] 
             [String]$DirSyncHost = ""
@@ -145,7 +149,9 @@ function Add-SharedMailboxGroup {
         #TODO - Add support for confirm and whatif
         $doConfirm = $false
         
-        [String] $_PermissionGroup = "SHMB-" + $Identity + "-" + $Permissions
+        $cleanIdentity = $Identity.Replace(' ', '_')
+
+        [String] $_PermissionGroup = "SHMB-" + $cleanIdentity + "-" + $Permissions
         [boolean] $_AutoMapping = $AutoMapping
         [String] $_AutoMapIdicator = ""
 
@@ -158,7 +164,7 @@ function Add-SharedMailboxGroup {
         [Microsoft.ActiveDirectory.Management.ADGroup]$_newGroup = New-ADGroup -Path $PermissionsOU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description $_GroupDescription -GroupScope Global -PassThru
 
         #Allow time for the change to sync in AD
-        Sleep 15
+        Sleep 60
 
         #Force directory sync.  Only run if DirSyncHost defined.  This allows this module to work with or without Office365 dirsync.
         if ($DirSyncHost.Length -ge 1) {
@@ -174,7 +180,7 @@ function Add-SharedMailboxGroup {
         Enable-SecurityGroupAsDistributionGroup -Identity $_PermissionGroup -DisplayName $_PermissionGroup -EmailAddress "$_PermissionGroup@$EmailDomain" -Hide -Confirm:$doConfirm
 
         #Allow time for the change to sync in AD
-        Sleep 15
+        Sleep 60
 
         #Force directory sync.  Only run if DirSyncHost defined.  This allows this module to work with or without Office365 dirsync.
         if ($DirSyncHost.Length -ge 1) {
