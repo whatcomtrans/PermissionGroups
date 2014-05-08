@@ -189,6 +189,8 @@ function Add-SharedMailboxGroup {
             Sleep 60
         }
 
+        Sleep 120
+
         #Assign the security group the fullAccess permission to access the shared mailbox
         Add-MailboxPermission -Identity $Identity -User $_PermissionGroup -AccessRights $Permissions -AutoMapping:$_AutoMapping -Confirm:$doConfirm
 
