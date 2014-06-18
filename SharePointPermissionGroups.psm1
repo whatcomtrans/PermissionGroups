@@ -38,15 +38,8 @@
 
         #Create AD permission group
         [Microsoft.ActiveDirectory.Management.ADGroup] $_group = New-ADGroup -DisplayName $_groupName -SAMAccountName $_groupName -Path $OU -Name $_groupName -GroupCategory Security -Description "SharePoint $Site site permission $SPOPermission" -GroupScope Global -PassThru
-        Sleep 30
+        Sleep 10
         Force-DirSync
-        Sleep 60
-        #Create SPO permission group
-        New-SPOSiteGroup -Site $Site -Group $_groupName -PermissionLevels $SPOPermission
-        #Add AD permission group as sole member of SPO permission group
-        Add-SPOUser -Site $Site -LoginName $_groupName -Group $_groupName
+        Sleep 10
     }
 }
-#Connect-SPOService
-#$_site = Get-SPOSite -Identity "https://whatcomtrans.sharepoint.com/"
-#New-SharePointPermissionsGroup -Permission RO -Site $_site -SubSite "Team_Site" -OU "OU=SharePointPermissionGroups,OU=PermissionGroups,DC=whatcomtrans,DC=net"
