@@ -111,7 +111,7 @@ function Get-FolderPermissionsGroupName {
         #Calculate group name
         foreach ($_commonPath in $PathCommonNames.keys) {
 	        if ($Path.StartsWith($_commonPath) -eq $true) {
-		        $_permissiongroup = $PathCommonNames.$_commonPath + "-" + $_permissiongroup.Replace($_commonPath, "")
+		        $_permissiongroup = $PathCommonNames.$_commonPath + $_permissiongroup.Replace($_commonPath, "")
 	        }
         }
         $_permissiongroup = $_permissiongroup.Replace("\\", "\").Replace("\", "-").Replace(" ", "_").Replace(":", "-")
