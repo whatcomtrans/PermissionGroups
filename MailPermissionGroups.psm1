@@ -1,18 +1,4 @@
-﻿<#
-.SYNOPSIS
-TODO
-
-.EXAMPLE
-TODO
-#>
-
-<#
-.SYNOPSIS
-Creates a new shared mailbox and an associated FullAccess group to manage access.
-
-.EXAMPLE
-TODO
-#>
+﻿
 function New-SharedMailbox {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param(
@@ -48,13 +34,6 @@ function New-SharedMailbox {
 	}
 }
 
-<#
-.SYNOPSIS
-Syncronizes a shared (or really any) mailbox's permissions so that members of groups assigned to the mailbox when are setup for AutoMapping are added directly to the permissions list with FullAccess.
-
-.EXAMPLE
-Sync-SharedMailboxAutoMapping IT@contosu.com
-#>
 function Sync-SharedMailboxAutoMapping {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param(
@@ -120,15 +99,7 @@ function Sync-SharedMailboxAutoMapping {
         }
 	}
 }
-#>
 
-<#
-.SYNOPSIS
-Creates a new shared mailbox and an associated FullAccess group to manage access.
-
-.EXAMPLE
-TODO
-#>
 function Add-SharedMailboxGroup {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param(
@@ -223,37 +194,186 @@ function Add-SharedMailboxGroup {
 	}
 }
 
-
-<#
-.SYNOPSIS
-TODO
-
-.EXAMPLE
-TODO#>
-<#
-function Verb-Noun {
+function New-PermissionsDistributionGroup {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param(
-		[Parameter(Mandatory=$true,Position=0,HelpMessage="Permission (RW,RO,LO, or a FileSystemRights Enumeration value, see http://msdn.microsoft.com/en-us/library/system.security.accesscontrol.filesystemrights.aspx)")] 
-            [String]$Permission,
-		[Parameter(Mandatory=$true,ValueFromPipeline=$true,Position=1,HelpMessage="Path to set permission on.")] 
-            [String]$Path,
-		[Parameter(Mandatory=$true,Position=2,HelpMessage="Name of user or group to assign permission to.")] 
-            [String]$AssignedTo,
-		[Parameter(Mandatory=$false,Position=3,HelpMessage="Determine how this rule is inherited by child objects.  Values are None, ContainerInherit, ObjectInherit or some combination of these values in a comma seperated string.  Default is ContainerInherit, ObjectInherit.  See http://msdn.microsoft.com/en-us/magazine/cc163885.aspx#S3")] 
-            [String]$InheritanceFlags="ContainerInherit, ObjectInherit",
-		[Parameter(Mandatory=$false,Position=4,HelpMessage="Determine how inheritance of this rule is propagated to child objects.  Values are None, NoPropagateInherit and InheritOnly or some combination of these values in a comma seperated string.  Default is None.  See http://msdn.microsoft.com/en-us/magazine/cc163885.aspx#S3")] 
-            [String]$PropagationFlags="None",
-		[Parameter(Mandatory=$false,Position=5,HelpMessage="Whether to Allow or Deny the permission, defaults to Allow")] [ValidateSet("Allow","Deny")] 
-            [String]$Grant="Allow"
+		[Parameter(Mandatory=$true,Position=1,HelpMessage="Mailbox name")] 
+            [String]$Name,
+        [Parameter(Mandatory=$true,Position=2,HelpMessage="Email address")] 
+            [String]$DisplayName,
+        [Parameter(Mandatory=$false, ValueFromPipeline=$true, Position=4,HelpMessage="Optional array of members to add (accepts same objects as Add-ADGroupMember)")] 
+            [Object[]] $Members,
+        [Parameter(Mandatory=$true,HelpMessage="The OU where the permissions groups will be created")] 
+            [String]$OU = "",
+        [Parameter(Mandatory=$false,HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'")] 
+            [String]$ADGroupPrefix = "EL-",
+        [Parameter(Mandatory=$true,HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'")] 
+            [String]$PrimarySMTPDomain,
+        [Parameter(HelpMessage="Returns the new AD Group, defaults to returning the distribution list object.")] 
+            [Switch]$ReturnADGroup
+
 	)
-	Begin {
-		#TODO
-	}
 	Process {
-        #TODO
+        #Setup names.
+        [String] $_cleanIdentity = $Name.Replace(' ', '_')
+        [String] $_PermissionGroup = "$($ADGroupPrefix)$($_cleanIdentity)"
+        [String] $_GroupDescription = "This group is synced with an Exchange Distribution list of similar name."
+
+        [String]$Alias = $_cleanIdentity  #$EmailAddress.Split("@")[0]
+
+        if ($pscmdlet.ShouldProcess("Create AD Group $_PermissionGroupName and Exchange Distribution Group $_DistListName adding members to both.")) {
+            #Create the Permission Group
+            [Microsoft.ActiveDirectory.Management.ADGroup]$PermissionGroup = New-ADGroup -Path $OU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description $_GroupDescription -GroupScope Global -PassThru
+
+            #Add Members to the Permission Group
+            if ($Members) {
+                Add-ADGroupMember -Identity $PermissionGroup.SamAccountName -Members $Members
+            }
+
+            #Create the New-DistributionGroup
+            $DistGroup = New-DistributionGroup -Name $DisplayName -Alias $Alias -DisplayName $DisplayName -PrimarySmtpAddress "$($Alias)@$($PrimarySMTPDomain)" -MemberDepartRestriction Closed
+
+            #Sync the membership by calling Sync-PermissionsDistributionList
+            Sync-PermissionsDistributionGroup -PermissionGroup $PermissionGroup -DistributionGroup $DistGroup
+
+            if ($ReturnADGroup) {
+                return $PermissionGroup
+            } else {
+                return $DistGroup
+            }
+        }
 	}
 }
-#>
 
-Export-ModuleMember -Function "New-SharedMailbox","Sync-SharedMailboxAutoMapping","Add-SharedMailboxGroup" #TODO "Verb-Noun"
+function Sync-PermissionsDistributionGroup {
+	[CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="objects")]
+	Param(
+        [Parameter(Mandatory=$true,Position=1,ValueFromPipeline=$true,ParameterSetName="objects",HelpMessage="ADGroup PermissionGroup object")] 
+            [Microsoft.ActiveDirectory.Management.ADGroup[]]$PermissionGroup,
+        [Parameter(Mandatory=$true,Position=2,ValueFromPipeline=$true,ParameterSetName="objects",HelpMessage="Exchnage DistributionGroup object")] 
+            [PSObject[]]$DistributionGroup,
+        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ParameterSetName="OU",HelpMessage="The OU where the permissions groups can be found.  All will be synced.")] 
+            [String]$OU = "",
+        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'")] 
+            [String]$ADGroupPrefix = "EL-",
+        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="The ADGroup property to use to find the email distribution group.  Defaults to Name.")] 
+            [String]$ADGroupProperty = "Name",
+        [Parameter(Mandatory=$false,HelpMessage="Default syncs ADGroup to DistributionGroup, this reverse the sync direction.")] 
+            [Switch] $ReverseDirection,
+        [Parameter(Mandatory=$false,HelpMessage="Default will get all ADGroup members recursevly and adds them individually, this will add as is.")] 
+            [Switch] $DoNotFlatten
+	)
+	Process {
+        [System.Collections.ArrayList] $_pairs = New-Object System.Collections.ArrayList
+
+        if ($OU) {
+            #OU
+            $_PermissionGroups = Get-ADGroup -SearchScope OneLevel -SearchBase $OU -Filter "*" | Where-Object -Property Name -Value "$($ADGroupPrefix)*" -like | Get-ADGroup
+            forEach ($_ADGroup in $_PermissionGroups) {
+                if ($ADGroupPrefix) {
+                    $_DGroupName = $_ADGroup.$ADGroupProperty.Replace($ADGroupPrefix, "")
+                } else {
+                    $_DGroupName = $_ADGroup.$ADGroupProperty.Name
+                }
+                $_DGroup = Get-DistributionGroup -Identity $_DGroupName
+                if ($_DGroup) {
+                    $_pair = @{"pgroup" = $_ADGroup; "dgroup" = $_DGroup}
+                    $_pairs.Add($_pair)
+                } else {
+                    Write-Warning "Unable to find DistributionGroup with name $_DGroup"
+                }
+            }
+
+        } else {
+            #objects
+            for ($i = 0; $i -lt $PermissionGroup.Count; $i++) {
+                $_pair = @{"pgroup" = $PermissionGroup[$i]; "dgroup" = $DistributionGroup[$i]}
+                $_pairs.Add($_pair)
+            }
+        }
+
+        forEach ($_pair in $_pairs) {
+            Write-Verbose $_pair
+            
+            $_PermissionGroup = $_pair.pgroup
+            $_DistributionGroup = $_pair.dgroup
+
+            $Flatten = $true
+            if ($DoNotFlatten) { $Flatten = $false}
+
+            #Gather members
+            $_PermissionGroupMembers = Get-ADGroupMember -Identity $_PermissionGroup -Recursive:$Flatten | Get-ADUser -Properties "mailNickname"
+            $_DistributionGroupMembers = Get-DistributionGroupMember -Identity $_DistributionGroup.Identity | Add-Member -MemberType AliasProperty -Name "mailNickname" -Value "Alias" -PassThru
+
+            #Preform compare
+            if (!$ReverseDirection) {
+                if (!$_DistributionGroupMembers) {
+                    $_Addmember = $_PermissionGroupMembers
+                    $_Removemember = @()
+                } elseif (!$_PermissionGroupMembers) {
+                    $_Removemember = $_DistributionGroupMembers
+                    $_Addmember = @()
+                } else {
+                    $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers -Property "mailNickname" -IncludeEqual -PassThru
+                    $_Addmember = $_results | where -Property SideIndicator -EQ -Value "<="
+                    $_Removemember = $_results | where -Property SideIndicator -EQ -Value "=>"
+                }
+
+                #Handle Adds
+                if ($_Addmember) {
+                    $_Addmember = $_Addmember.mailNickname
+                    $_AddMember | Add-DistributionGroupMember -Identity $_DistributionGroup.Identity
+                }
+
+                #Handle Removes
+                if ($_Removemember) {
+                    $_Removemember = $_Removemember.mailNickname
+                    $_Removemember | Remove-DistributionGroupMember -Identity $_DistributionGroup.Identity
+                }
+            } else {
+                if (!$_DistributionGroupMembers) {
+                    $_Addmember = @()
+                    $_Removemember = $_PermissionGroupMembers
+                } elseif (!$_PermissionGroupMembers) {
+                    $_Removemember = @()
+                    $_Addmember = $_DistributionGroupMembers
+                } else {
+                    $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers -Property "mailNickname" -IncludeEqual -PassThru
+                    $_Addmember = $_results | where -Property SideIndicator -EQ -Value "=>"
+                    $_Removemember = $_results | where -Property SideIndicator -EQ -Value "<="
+                }
+
+                #Handle Adds
+                if ($_Addmember) {
+                    $_Addmember = $_Addmember.mailNickname
+                    $_Addmember | Add-ADGroupMember -Identity $_PermissionGroup.DistinguishedName
+                }
+
+                #Handle Removes
+                if ($_Removemember) {
+                    $_Removemember = $_Removemember.mailNickname
+                    $_Removemember | Remove-ADGroupMember -Identity $_PermissionGroup.DistinguishedName
+                }
+            }
+        }
+	}
+}
+
+function Remove-PermissionsDistributionGroup {
+	[CmdletBinding(SupportsShouldProcess=$true)]
+	Param(
+		[Parameter(Mandatory=$true,Position=1,HelpMessage="Mailbox name")] 
+            [String]$Name
+    )
+	Process {
+        [String] $_cleanIdentity = $Name.Replace(' ', '_')
+        [String] $_PermissionGroup = "EL-$_cleanIdentity"
+        [String]$Alias = $_cleanIdentity
+
+        Remove-ADGroup -Identity $_PermissionGroup
+
+        Remove-DistributionGroup -Identity $Alias
+    }    
+}
+
+Export-ModuleMember -Function "New-SharedMailbox","Sync-SharedMailboxAutoMapping","Add-SharedMailboxGroup", "New-PermissionsDistributionGroup", "Sync-PermissionsDistributionGroup", "Remove-PermissionsDistributionGroup" #TODO "Verb-Noun"
