@@ -13,9 +13,9 @@ function Choose-EmployeeADUser {
 	)
 	Process {
         if ($Single) {
-            (Get-ADUser -Filter {DistinguishedName -like "*"} -SearchBase "OU=Employees,DC=whatcomtrans,DC=net" | Out-GridView -OutputMode Single -Passthrough -Title "Choose Employee(s)")
+            (Get-ADUser -Filter {DistinguishedName -like "*"} -SearchBase $SearchBase -Properties Title,Department | Out-GridView -OutputMode Single -Passthrough -Title "Choose Employee(s)")
         } else {
-            (Get-ADUser -Filter {DistinguishedName -like "*"} -SearchBase "OU=Employees,DC=whatcomtrans,DC=net" | Out-GridView -OutputMode Multiple -Title "Choose Employee(s)")
+            (Get-ADUser -Filter {DistinguishedName -like "*"} -SearchBase $SearchBase -Properties Title,Department | Out-GridView -OutputMode Multiple -Title "Choose Employee(s)")
         }
 	}
 }

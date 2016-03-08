@@ -195,20 +195,28 @@ function Add-SharedMailboxGroup {
 }
 
 function New-PermissionsDistributionGroup {
-	[CmdletBinding(SupportsShouldProcess=$true)]
+	[CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="UseDLName")]
 	Param(
-		[Parameter(Mandatory=$true,Position=1,HelpMessage="Mailbox name")] 
+		[Parameter(Mandatory=$true,Position=1,HelpMessage="Mailbox name/first part of email address.")] 
             [String]$Name,
-        [Parameter(Mandatory=$true,Position=2,HelpMessage="Email address")] 
+        [Parameter(Mandatory=$true,Position=2,HelpMessage="Display name to show in address book.")] 
             [String]$DisplayName,
-        [Parameter(Mandatory=$false, ValueFromPipeline=$true, Position=4,HelpMessage="Optional array of members to add (accepts same objects as Add-ADGroupMember)")] 
+        [Parameter(Mandatory=$false,Position=3,HelpMessage="Specifies the name fo the AD Group to create.  If not provided, the DLName is used with the optional ADGroupPrefix.")] 
+            [String]$ADGroupName,
+        [Parameter(Mandatory=$false,HelpMessage="Specifies that the Distribution List Distinguished Name is to be added to a property of the ADGroup that is created.  Uses the property specified by ADGroupProperty or it's default.")]
+            [Switch]$UseADGroupProperty,
+        [Parameter(Mandatory=$false,HelpMessage="The ADGroup property to use to save the Distribution List Distinguished Name to.  Defaults to info.")] 
+            [String]$ADGroupProperty = "info",
+        [Parameter(Mandatory=$false, ValueFromPipeline=$true, Position=4,HelpMessage="Optional array of members to add (accepts same objects as Add-ADGroupMember).")] 
             [Object[]] $Members,
-        [Parameter(Mandatory=$true,HelpMessage="The OU where the permissions groups will be created")] 
+        [Parameter(Mandatory=$true,HelpMessage="The OU where the permissions groups will be created.")] 
             [String]$OU = "",
-        [Parameter(Mandatory=$false,HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'")] 
+        [Parameter(Mandatory=$false,HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'.  May be set to empty to have both names match.")] 
             [String]$ADGroupPrefix = "EL-",
-        [Parameter(Mandatory=$true,HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'")] 
+        [Parameter(Mandatory=$true,HelpMessage="The primary domain to use for the email address.  Set as primary in the proxy addresses.")] 
             [String]$PrimarySMTPDomain,
+        [Parameter(Mandatory=$false,HelpMessage="An array of one or more alternative domain names to setup as proxy addresses.")] 
+            [String[]]$OtherSMTPDomain,
         [Parameter(HelpMessage="Returns the new AD Group, defaults to returning the distribution list object.")] 
             [Switch]$ReturnADGroup
 
@@ -216,7 +224,12 @@ function New-PermissionsDistributionGroup {
 	Process {
         #Setup names.
         [String] $_cleanIdentity = $Name.Replace(' ', '_')
-        [String] $_PermissionGroup = "$($ADGroupPrefix)$($_cleanIdentity)"
+
+        if (!$ADGroupName) {
+            [String] $_PermissionGroup = "$($ADGroupPrefix)$($_cleanIdentity)"
+        } else {
+            [String] $_PermissionGroup = $ADGroupName
+        }
         [String] $_GroupDescription = "This group is synced with an Exchange Distribution list of similar name."
 
         [String]$Alias = $_cleanIdentity  #$EmailAddress.Split("@")[0]
@@ -224,6 +237,8 @@ function New-PermissionsDistributionGroup {
         if ($pscmdlet.ShouldProcess("Create AD Group $_PermissionGroupName and Exchange Distribution Group $_DistListName adding members to both.")) {
             #Create the Permission Group
             [Microsoft.ActiveDirectory.Management.ADGroup]$PermissionGroup = New-ADGroup -Path $OU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description $_GroupDescription -GroupScope Global -PassThru
+            
+            Sleep -Seconds 2
 
             #Add Members to the Permission Group
             if ($Members) {
@@ -231,7 +246,17 @@ function New-PermissionsDistributionGroup {
             }
 
             #Create the New-DistributionGroup
-            $DistGroup = New-DistributionGroup -Name $DisplayName -Alias $Alias -DisplayName $DisplayName -PrimarySmtpAddress "$($Alias)@$($PrimarySMTPDomain)" -MemberDepartRestriction Closed
+            $DistGroup = New-DistributionGroup -Name $DisplayName -Alias $Alias -DisplayName $DisplayName -PrimarySmtpAddress "$($Alias)@$($PrimarySMTPDomain)" -MemberDepartRestriction Closed -MemberJoinRestriction Closed
+
+            #Update PermissionGroup if needed
+            if ($UseADGroupProperty) {
+                $PermissionGroup | Set-ADGroup -Add @{$($ADGroupProperty)=$DistGroup.DistinguishedName}
+            }
+
+            forEach ($other in $OtherSMTPDomain) {
+                #TODO - Set-ProxyAddress currently does not support DistributionGroups
+                #Set-ProxyAddress -Identity ($DistGroup).Alias -ProxyAddress "$($Alias)@$($other)"
+            }
 
             #Sync the membership by calling Sync-PermissionsDistributionList
             Sync-PermissionsDistributionGroup -PermissionGroup $PermissionGroup -DistributionGroup $DistGroup
@@ -248,16 +273,24 @@ function New-PermissionsDistributionGroup {
 function Sync-PermissionsDistributionGroup {
 	[CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="objects")]
 	Param(
-        [Parameter(Mandatory=$true,Position=1,ValueFromPipeline=$true,ParameterSetName="objects",HelpMessage="ADGroup PermissionGroup object")] 
+        [Parameter(Mandatory=$true,Position=1,ValueFromPipeline=$true,ParameterSetName="objects",HelpMessage="ADGroup PermissionGroup object")]
+        [Parameter(ParameterSetName="UseProperty")]
+        [Parameter(ParameterSetName="MatchOnName")]
             [Microsoft.ActiveDirectory.Management.ADGroup[]]$PermissionGroup,
         [Parameter(Mandatory=$true,Position=2,ValueFromPipeline=$true,ParameterSetName="objects",HelpMessage="Exchnage DistributionGroup object")] 
+        [Parameter(ParameterSetName="MatchOnName")]
             [PSObject[]]$DistributionGroup,
         [Parameter(Mandatory=$true,ValueFromPipeline=$true,ParameterSetName="OU",HelpMessage="The OU where the permissions groups can be found.  All will be synced.")] 
             [String]$OU = "",
-        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'")] 
+        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'.  Only needed if matching on Name.")] 
+        [Parameter(ParameterSetName="MatchOnName")]
             [String]$ADGroupPrefix = "EL-",
-        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="The ADGroup property to use to find the email distribution group.  Defaults to Name.")] 
-            [String]$ADGroupProperty = "Name",
+        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="Specifies that the Distribution List Distinguished Name is to be added to a property of the ADGroup that is created.  Uses the property specified by ADGroupProperty or it's default.")]
+        [Parameter(ParameterSetName="UseProperty")]
+            [Switch]$UseADGroupProperty,
+        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="The ADGroup property to use to find the email distribution group.  Defaults to info.")] 
+        [Parameter(ParameterSetName="UseProperty")]
+            [String]$ADGroupProperty = "info",
         [Parameter(Mandatory=$false,HelpMessage="Default syncs ADGroup to DistributionGroup, this reverse the sync direction.")] 
             [Switch] $ReverseDirection,
         [Parameter(Mandatory=$false,HelpMessage="Default will get all ADGroup members recursevly and adds them individually, this will add as is.")] 
@@ -268,12 +301,21 @@ function Sync-PermissionsDistributionGroup {
 
         if ($OU) {
             #OU
-            $_PermissionGroups = Get-ADGroup -SearchScope OneLevel -SearchBase $OU -Filter "*" | Where-Object -Property Name -Value "$($ADGroupPrefix)*" -like | Get-ADGroup
+            if (!$UseADGroupProperty) {   #Use name matching
+                $_PermissionGroups = Get-ADGroup -SearchScope OneLevel -SearchBase $OU -Filter "*" | Where-Object -Property Name -Value "$($ADGroupPrefix)*" -like | Get-ADGroup
+            } else {   #Use group property
+                $_PermissionGroups = Get-ADGroup -SearchScope OneLevel -SearchBase $OU -Filter "*" -Properties $ADGroupProperty | Where-Object -Property $ADGroupProperty -Like -Value "CN*" | Get-ADGroup -Properties $ADGroupProperty
+            }
+
             forEach ($_ADGroup in $_PermissionGroups) {
-                if ($ADGroupPrefix) {
-                    $_DGroupName = $_ADGroup.$ADGroupProperty.Replace($ADGroupPrefix, "")
+                if (!$UseADGroupProperty) {
+                    if ($ADGroupPrefix) {
+                        $_DGroupName = $_ADGroup.$ADGroupProperty.Replace($ADGroupPrefix, "")
+                    } else {
+                        $_DGroupName = $_ADGroup.$ADGroupProperty.Name
+                    }
                 } else {
-                    $_DGroupName = $_ADGroup.$ADGroupProperty.Name
+                    $_DGroupName = $_ADGroup.$ADGroupProperty
                 }
                 $_DGroup = Get-DistributionGroup -Identity $_DGroupName
                 if ($_DGroup) {
@@ -285,10 +327,46 @@ function Sync-PermissionsDistributionGroup {
             }
 
         } else {
-            #objects
-            for ($i = 0; $i -lt $PermissionGroup.Count; $i++) {
-                $_pair = @{"pgroup" = $PermissionGroup[$i]; "dgroup" = $DistributionGroup[$i]}
-                $_pairs.Add($_pair)
+            if ($PermissionGroup.Count -gt 0 -and $DistributionGroup.Count -eq 0) {    #Use PermissionGroup only to build pairs
+                if ($UseADGroupProperty) { #By using property
+                    forEach ($_PGroup in $PermissionGroup) {
+                        $_PGroup = $_PGroup | Get-ADGroup -Properties $ADGroupProperty
+                        $_DGroup = Get-DistributionGroup -Identity $($_PGroup.$ADGroupProperty)
+                        $_pair = @{"pgroup" = $_PGroup; "dgroup" = $_DGroup}
+                        $_pairs.Add($_pair)
+                    }
+                } else { #Attempt to match by name
+                    forEach ($_PGroup in $PermissionGroup) {
+                        $_DGroupName = $_PGroup.Name.Replace($ADGroupPrefix, "")
+                        $_DGroup = Get-DistributionGroup -Identity $_DGroupName -ErrorAction SilentlyContinue
+                        if ($_DGroup) {
+                            $_pair = @{"pgroup" = $_PGroup; "dgroup" = $_DGroup}
+                            $_pairs.Add($_pair)
+                        }
+                    }
+                }
+            } elseif ($DistributionGroup.Count -gt 0 -and $PermissionGroup.Count -eq 0) {  #Use DistributionGroup and name matching to build pairs 
+                forEach ($_DGroup in $DistributionGroup) {
+                    $_DGroup = $_DGroup | Get-DistributionGroup -ErrorAction SilentlyContinue
+                    if ($_DGroup) {
+                        $_PGroupName = $ADGroupPrefix + $_DGroup.Alias
+                        try {
+                            $_PGroup = Get-ADGroup -Identity $_PGroupName -ErrorAction SilentlyContinue
+                        } catch {}
+                        if ($_PGroup) {
+                            $_pair = @{"pgroup" = $_PGroup; "dgroup" = $_DGroup}
+                            $_pairs.Add($_pair)
+                        }
+                    }
+                }
+            } elseif ($DistributionGroup.Count -eq $PermissionGroup.Count) {   #Use matched objects
+                #objects
+                for ($i = 0; $i -lt $PermissionGroup.Count; $i++) {
+                    $_pair = @{"pgroup" = $PermissionGroup[$i]; "dgroup" = $DistributionGroup[$i]}
+                    $_pairs.Add($_pair)
+                }
+            }else {  #Throw error
+                throw("When using both DistributionGroup and PermissionGroup parameters, there must be an equal count of both")
             }
         }
 
@@ -299,10 +377,12 @@ function Sync-PermissionsDistributionGroup {
             $_DistributionGroup = $_pair.dgroup
 
             $Flatten = $true
-            if ($DoNotFlatten) { $Flatten = $false}
+            #TODO Fix flatten by fixing the TODO below
+            #if ($DoNotFlatten) { $Flatten = $false}
 
             #Gather members
-            $_PermissionGroupMembers = Get-ADGroupMember -Identity $_PermissionGroup -Recursive:$Flatten | Get-ADUser -Properties "mailNickname"
+            #TODO - Only supports USER objects, need to determine type of object returned by Get-ADGroupMember and get the right user.
+            $_PermissionGroupMembers = Get-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Recursive:$Flatten | Get-ADUser -Properties "mailNickname"
             $_DistributionGroupMembers = Get-DistributionGroupMember -Identity $_DistributionGroup.Identity | Add-Member -MemberType AliasProperty -Name "mailNickname" -Value "Alias" -PassThru
 
             #Preform compare
@@ -346,13 +426,13 @@ function Sync-PermissionsDistributionGroup {
                 #Handle Adds
                 if ($_Addmember) {
                     $_Addmember = $_Addmember.mailNickname
-                    $_Addmember | Add-ADGroupMember -Identity $_PermissionGroup.DistinguishedName
+                    Add-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Members ($_Addmember | Get-ADUser)
                 }
 
                 #Handle Removes
                 if ($_Removemember) {
                     $_Removemember = $_Removemember.mailNickname
-                    $_Removemember | Remove-ADGroupMember -Identity $_PermissionGroup.DistinguishedName
+                    Remove-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Members ($_Removemember | Get-ADUser)
                 }
             }
         }
@@ -360,19 +440,114 @@ function Sync-PermissionsDistributionGroup {
 }
 
 function Remove-PermissionsDistributionGroup {
-	[CmdletBinding(SupportsShouldProcess=$true)]
+	[CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="objects")]
 	Param(
-		[Parameter(Mandatory=$true,Position=1,HelpMessage="Mailbox name")] 
-            [String]$Name
-    )
+        [Parameter(Mandatory=$true,Position=1,ValueFromPipeline=$true,ParameterSetName="objects",HelpMessage="ADGroup PermissionGroup object")]
+        [Parameter(ParameterSetName="UseProperty")]
+        [Parameter(ParameterSetName="MatchOnName")]
+            [Microsoft.ActiveDirectory.Management.ADGroup[]]$PermissionGroup,
+        [Parameter(Mandatory=$true,Position=2,ValueFromPipeline=$true,ParameterSetName="objects",HelpMessage="Exchnage DistributionGroup object")] 
+        [Parameter(ParameterSetName="MatchOnName")]
+            [PSObject[]]$DistributionGroup,
+        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ParameterSetName="OU",HelpMessage="The OU where the permissions groups can be found.  All will be synced.")] 
+            [String]$OU = "",
+        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'.  Only needed if matching on Name.")] 
+        [Parameter(ParameterSetName="MatchOnName")]
+            [String]$ADGroupPrefix = "EL-",
+        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="Specifies that the Distribution List Distinguished Name is to be added to a property of the ADGroup that is created.  Uses the property specified by ADGroupProperty or it's default.")]
+        [Parameter(ParameterSetName="UseProperty")]
+            [Switch]$UseADGroupProperty,
+        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="The ADGroup property to use to find the email distribution group.  Defaults to info.")] 
+        [Parameter(ParameterSetName="UseProperty")]
+            [String]$ADGroupProperty = "info"
+	)
 	Process {
-        [String] $_cleanIdentity = $Name.Replace(' ', '_')
-        [String] $_PermissionGroup = "EL-$_cleanIdentity"
-        [String]$Alias = $_cleanIdentity
+        [System.Collections.ArrayList] $_pairs = New-Object System.Collections.ArrayList
 
-        Remove-ADGroup -Identity $_PermissionGroup
+        if ($OU) {
+            #OU
+            if (!$UseADGroupProperty) {   #Use name matching
+                $_PermissionGroups = Get-ADGroup -SearchScope OneLevel -SearchBase $OU -Filter "*" | Where-Object -Property Name -Value "$($ADGroupPrefix)*" -like | Get-ADGroup
+            } else {   #Use group property
+                $_PermissionGroups = Get-ADGroup -SearchScope OneLevel -SearchBase $OU -Filter "*" -Properties $ADGroupProperty | Where-Object -Property $ADGroupProperty -Like -Value "CN*" | Get-ADGroup -Properties $ADGroupProperty
+            }
 
-        Remove-DistributionGroup -Identity $Alias
+            forEach ($_ADGroup in $_PermissionGroups) {
+                if (!$UseADGroupProperty) {
+                    if ($ADGroupPrefix) {
+                        $_DGroupName = $_ADGroup.$ADGroupProperty.Replace($ADGroupPrefix, "")
+                    } else {
+                        $_DGroupName = $_ADGroup.$ADGroupProperty.Name
+                    }
+                } else {
+                    $_DGroupName = $_ADGroup.$ADGroupProperty
+                }
+                $_DGroup = Get-DistributionGroup -Identity $_DGroupName
+                if ($_DGroup) {
+                    $_pair = @{"pgroup" = $_ADGroup; "dgroup" = $_DGroup}
+                    $_pairs.Add($_pair)
+                } else {
+                    Write-Warning "Unable to find DistributionGroup with name $_DGroup"
+                }
+            }
+
+        } else {
+            if ($PermissionGroup.Count -gt 0 -and $DistributionGroup.Count -eq 0) {    #Use PermissionGroup only to build pairs
+                if ($UseADGroupProperty) { #By using property
+                    forEach ($_PGroup in $PermissionGroup) {
+                        $_PGroup = $_PGroup | Get-ADGroup -Properties $ADGroupProperty
+                        $_DGroup = Get-DistributionGroup -Identity $($_PGroup.$ADGroupProperty)
+                        $_pair = @{"pgroup" = $_PGroup; "dgroup" = $_DGroup}
+                        $_pairs.Add($_pair)
+                    }
+                } else { #Attempt to match by name
+                    forEach ($_PGroup in $PermissionGroup) {
+                        $_DGroupName = $_PGroup.Name.Replace($ADGroupPrefix, "")
+                        $_DGroup = Get-DistributionGroup -Identity $_DGroupName -ErrorAction SilentlyContinue
+                        if ($_DGroup) {
+                            $_pair = @{"pgroup" = $_PGroup; "dgroup" = $_DGroup}
+                            $_pairs.Add($_pair)
+                        }
+                    }
+                }
+            } elseif ($DistributionGroup.Count -gt 0 -and $PermissionGroup.Count -eq 0) {  #Use DistributionGroup and name matching to build pairs 
+                forEach ($_DGroup in $DistributionGroup) {
+                    $_DGroup = $_DGroup | Get-DistributionGroup -ErrorAction SilentlyContinue
+                    if ($_DGroup) {
+                        $_PGroupName = $ADGroupPrefix + $_DGroup.Alias
+                        try {
+                            $_PGroup = Get-ADGroup -Identity $_PGroupName -ErrorAction SilentlyContinue
+                        } catch {}
+                        if ($_PGroup) {
+                            $_pair = @{"pgroup" = $_PGroup; "dgroup" = $_DGroup}
+                            $_pairs.Add($_pair)
+                        }
+                    }
+                }
+            } elseif ($DistributionGroup.Count -eq $PermissionGroup.Count) {   #Use matched objects
+                #objects
+                for ($i = 0; $i -lt $PermissionGroup.Count; $i++) {
+                    $_pair = @{"pgroup" = $PermissionGroup[$i]; "dgroup" = $DistributionGroup[$i]}
+                    $_pairs.Add($_pair)
+                }
+            }else {  #Throw error
+                throw("When using both DistributionGroup and PermissionGroup parameters, there must be an equal count of both")
+            }
+        }
+
+        forEach ($_pair in $_pairs) {
+            Write-Verbose "About to remove this ADGroup and Exchange DistributionGroup: $_pair"
+            if ($Force -or $pscmdlet.ShouldProcess("Remove the following ADGroup and Exchange DistributionGroup: $_pair ?")) {
+                try {
+                    $_DGroup = $_pair.dgroup.DistinguishedName | Get-DistributionGroup
+                    Remove-DistributionGroup -Identity $_pair.dgroup.DistinguishedName -Confirm:$false
+
+                    $_PGroup = $_pair.pgroup.DistinguishedName | Get-ADGroup
+                    Remove-ADGroup -Identity $_pair.pgroup.DistinguishedName -Confirm:$false
+                } catch {}                
+            }
+
+        }
     }    
 }
 
