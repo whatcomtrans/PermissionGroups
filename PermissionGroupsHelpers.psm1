@@ -20,4 +20,44 @@ function Choose-EmployeeADUser {
 	}
 }
 
-Export-ModuleMember -Function "Choose-EmployeeADUser"
+function Get-RoleADGroup {
+	[CmdletBinding(SupportsShouldProcess=$false,DefaultParameterSetName="example")]
+	Param(
+        [Parameter(Mandatory=$true,Position=0,HelpMessage="The name of the Role Type, must match the name of the OU containing the groups requested")]
+		[String]$RoleType,
+		[Parameter(Mandatory=$false,HelpMessage="ONLY USE IN ISE, pipes results to Out-GridView for further filtering before returning results")]
+        [Switch]$ShowGridView,
+		[Parameter(Mandatory=$true,HelpMessage="The base part of the OU that when appended to RoleType forms the SearchBase for the Get-ADGroup command")]
+		[String]$OUBase
+	)
+	Process {
+        $groups = Get-ADGroup -Filter * -SearchBase "OU=$($RoleType),$($OUBase)"
+        if ($ShowGridView) {
+            return $groups | Out-GridView -OutputMode Multiple -Title "$RoleType Role Groups"
+        } else {
+            return $groups
+        }
+	}
+}
+
+
+function Get-RolePositionGroup {
+    [CmdletBinding(SupportsShouldProcess=$false,DefaultParameterSetName="OU")]
+	Param(
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,HelpMessage="The title of the position which we are returning the matching role group")]
+		[Object]$PositionTitle,
+        [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="Active Directory OU to limit search of role group to")]
+        [String]$OU,
+        [Parameter(Mandatory=$false,HelpMessage="The property to match PositionTitle against")]
+        [String]$PropertyName="displayName"
+	)
+	Process {
+        if ($OU) {
+            return Get-ADGroup -Filter "$PropertyName -EQ '$PositionTitle'" -SearchBase $OU
+        } else {
+            return Get-ADGroup -Filter "$PropertyName -EQ '$PositionTitle'"
+        }
+	}
+}
+
+Export-ModuleMember -Function *

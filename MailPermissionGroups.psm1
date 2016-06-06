@@ -332,8 +332,12 @@ function Sync-PermissionsDistributionGroup {
                     forEach ($_PGroup in $PermissionGroup) {
                         $_PGroup = $_PGroup | Get-ADGroup -Properties $ADGroupProperty
                         $_DGroup = Get-DistributionGroup -Identity $($_PGroup.$ADGroupProperty)
-                        $_pair = @{"pgroup" = $_PGroup; "dgroup" = $_DGroup}
-                        $_pairs.Add($_pair)
+                        if ($_DGroup) {
+                            $_pair = @{"pgroup" = $_PGroup; "dgroup" = $_DGroup}
+                            $_pairs.Add($_pair)
+                        } else {
+                            Write-Verbose "No matching distribution group found for $($_PGroup.Name)"
+                        }
                     }
                 } else { #Attempt to match by name
                     forEach ($_PGroup in $PermissionGroup) {
@@ -425,13 +429,13 @@ function Sync-PermissionsDistributionGroup {
 
                 #Handle Adds
                 if ($_Addmember) {
-                    $_Addmember = $_Addmember.mailNickname
+                    $_Addmember = $_Addmember.UserPrincipalName
                     Add-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Members ($_Addmember | Get-ADUser)
                 }
 
                 #Handle Removes
                 if ($_Removemember) {
-                    $_Removemember = $_Removemember.mailNickname
+                    $_Removemember = $_Removemember.UserPrincipalName
                     Remove-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Members ($_Removemember | Get-ADUser)
                 }
             }
