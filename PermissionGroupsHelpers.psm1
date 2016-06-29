@@ -60,4 +60,39 @@ function Get-RolePositionGroup {
 	}
 }
 
+function Get-ADGroupMemberChanges {
+	[CmdletBinding(SupportsShouldProcess=$false)]
+	Param(
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipelineByPropertyName=$true,HelpMessage="Group to compare")]
+		[String] $SamAccountName,
+		[Parameter(Mandatory=$false,Position=1,HelpMessage="Path to store comparison data, defaults to current directory")]
+        [String] $Path = ".\",
+        [Parameter(Mandatory=$false,HelpMessage="Do not save the changes")]
+        [Switch] $NoSave
+	)
+	Begin {
+        #Put begining stuff here
+	}
+	Process {
+        [String] $filePath = "$($Path)$($SamAccountName).xml"
+        if (Test-Path $filePath) {
+            $newValues = (Get-ADGroupMember -Identity $SamAccountName -Recursive).SID.Value
+            $results = Compare-Object -ReferenceObject (Import-Clixml $filePath) -DifferenceObject $newValues | Select-Object -Property @{Name = "SID"; Expression = {$_.InputObject}},@{Name = "Change"; Expression = {if ($_.SideIndicator -eq "=>") {return "Add"} else {return "Remove"}}}
+            if (!$NoSave) {
+                $newValues | Export-Clixml $filePath
+            }
+            $asHashTable = @{Add = ($results | Where-Object -Property Change -EQ -Value Add | %{Get-ADUser -Identity $_.SID}); Remove = ($results | Where-Object -Property Change -EQ -Value Remove | %{Get-ADUser -Identity $_.SID})}
+            return $asHashTable
+        } else {
+            #Initial data set
+            (Get-ADGroupMember -Identity $SamAccountName -Recursive).SID.Value | Export-Clixml $filePath
+            Write-Warning -Message "Initial load of data set, no comparison made"
+            return $Null
+        }
+	}
+	End {
+        #Put end here
+	}
+}
+
 Export-ModuleMember -Function *
