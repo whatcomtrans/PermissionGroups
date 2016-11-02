@@ -16,7 +16,7 @@ function New-SharedMailbox {
             [String]$DirSyncHost = ""
 	)
     Begin {
-        Test-Office365Loaded -BreakOnFalse
+        Test-Office365Loaded -ErrorOnFalse
     }
 	Process {
         #Determine alias from email address
@@ -44,7 +44,7 @@ function Sync-SharedMailboxAutoMapping {
             [Object]$Identity
 	)
 	Begin {
-        Test-Office365Loaded -BreakOnFalse
+        Test-Office365Loaded -ErrorOnFalse
     }
     Process {
         #TODO - Modify comparison process to handle access other then FullAccess
@@ -123,7 +123,7 @@ function Add-SharedMailboxGroup {
             [String]$DirSyncHost = ""
 	)
 	Begin {
-        Test-Office365Loaded -BreakOnFalse
+        Test-Office365Loaded -ErrorOnFalse
     }
     Process {
         #TODO - Add support for confirm and whatif
@@ -231,7 +231,7 @@ function New-PermissionsDistributionGroup {
 
 	)
     Begin {
-        Test-Office365Loaded -BreakOnFalse
+        Test-Office365Loaded -ErrorOnFalse
     }	
     Process {
         #Setup names.
@@ -309,7 +309,7 @@ function Sync-PermissionsDistributionGroup {
             [Switch] $DoNotFlatten
 	)
 	Begin {
-        Test-Office365Loaded -BreakOnFalse
+        Test-Office365Loaded -ErrorOnFalse
     }
     Process {
         [System.Collections.ArrayList] $_pairs = New-Object System.Collections.ArrayList
@@ -325,7 +325,7 @@ function Sync-PermissionsDistributionGroup {
             forEach ($_ADGroup in $_PermissionGroups) {
                 if (!$UseADGroupProperty) {
                     if ($ADGroupPrefix) {
-                        $_DGroupName = $_ADGroup.Name.Replace($ADGroupPrefix, "")
+                        $_DGroupName = $_ADGroup.Nameping.Replace($ADGroupPrefix, "")
                     } else {
                         $_DGroupName = $_ADGroup.Name
                     }
@@ -481,7 +481,7 @@ function Remove-PermissionsDistributionGroup {
             [String]$ADGroupProperty = "info"
 	)
     Begin {
-        Test-Office365Loaded -BreakOnFalse
+        Test-Office365Loaded -ErrorOnFalse
     }
 	Process {
         [System.Collections.ArrayList] $_pairs = New-Object System.Collections.ArrayList
