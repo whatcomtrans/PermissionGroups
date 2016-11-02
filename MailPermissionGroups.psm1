@@ -580,7 +580,7 @@ function Test-Office365Loaded {
         [Switch] $ErrorOnFalse
     )
     $warning = ""
-    $answer = ((Get-Command Get-DistributionGroup).Count -gt 0)
+    $answer = ((Get-Command Get-DistributionGroup -ErrorAction SilentlyContinue).Count -gt 0)
     if ($answer -eq $false) {
         if ($ErrorOnFalse) {
             Write-Error $warning
