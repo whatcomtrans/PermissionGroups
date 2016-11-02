@@ -15,6 +15,9 @@ function New-SharedMailbox {
         [Parameter(Mandatory=$false,Position=6,HelpMessage="If using DirSync, specify the computername where it runs")] 
             [String]$DirSyncHost = ""
 	)
+    Begin {
+        Test-Office365Loaded -BreakOnFalse
+    }
 	Process {
         #Determine alias from email address
         [String]$Alias = $EmailAddress.Split("@")[0]
@@ -40,7 +43,10 @@ function Sync-SharedMailboxAutoMapping {
 		[Parameter(Mandatory=$true,Position=0,ValueFromPipelineByPropertyName=$True,HelpMessage="Mailbox identity")] 
             [Object]$Identity
 	)
-	Process {
+	Begin {
+        Test-Office365Loaded -BreakOnFalse
+    }
+    Process {
         #TODO - Modify comparison process to handle access other then FullAccess
         #TODO - Also, this assumes the only users directly mapped will be AutoMapped
         #TODO - Add support for confirm and whatif
@@ -116,7 +122,10 @@ function Add-SharedMailboxGroup {
         [Parameter(Mandatory=$false,Position=5,HelpMessage="If using DirSync, specify the computername where it runs")] 
             [String]$DirSyncHost = ""
 	)
-	Process {
+	Begin {
+        Test-Office365Loaded -BreakOnFalse
+    }
+    Process {
         #TODO - Add support for confirm and whatif
         $doConfirm = $false
         
@@ -221,7 +230,10 @@ function New-PermissionsDistributionGroup {
             [Switch]$ReturnADGroup
 
 	)
-	Process {
+    Begin {
+        Test-Office365Loaded -BreakOnFalse
+    }	
+    Process {
         #Setup names.
         [String] $_cleanIdentity = $Name.Replace(' ', '_')
 
@@ -296,7 +308,10 @@ function Sync-PermissionsDistributionGroup {
         [Parameter(Mandatory=$false,HelpMessage="Default will get all ADGroup members recursevly and adds them individually, this will add as is.")] 
             [Switch] $DoNotFlatten
 	)
-	Process {
+	Begin {
+        Test-Office365Loaded -BreakOnFalse
+    }
+    Process {
         [System.Collections.ArrayList] $_pairs = New-Object System.Collections.ArrayList
 
         if ($OU) {
@@ -310,9 +325,9 @@ function Sync-PermissionsDistributionGroup {
             forEach ($_ADGroup in $_PermissionGroups) {
                 if (!$UseADGroupProperty) {
                     if ($ADGroupPrefix) {
-                        $_DGroupName = $_ADGroup.$ADGroupProperty.Replace($ADGroupPrefix, "")
+                        $_DGroupName = $_ADGroup.Replace($ADGroupPrefix, "")
                     } else {
-                        $_DGroupName = $_ADGroup.$ADGroupProperty.Name
+                        $_DGroupName = $_ADGroup.Name
                     }
                 } else {
                     $_DGroupName = $_ADGroup.$ADGroupProperty
@@ -465,6 +480,9 @@ function Remove-PermissionsDistributionGroup {
         [Parameter(ParameterSetName="UseProperty")]
             [String]$ADGroupProperty = "info"
 	)
+    Begin {
+        Test-Office365Loaded -BreakOnFalse
+    }
 	Process {
         [System.Collections.ArrayList] $_pairs = New-Object System.Collections.ArrayList
 
@@ -479,9 +497,9 @@ function Remove-PermissionsDistributionGroup {
             forEach ($_ADGroup in $_PermissionGroups) {
                 if (!$UseADGroupProperty) {
                     if ($ADGroupPrefix) {
-                        $_DGroupName = $_ADGroup.$ADGroupProperty.Replace($ADGroupPrefix, "")
+                        $_DGroupName = $_ADGroup.Replace($ADGroupPrefix, "")
                     } else {
-                        $_DGroupName = $_ADGroup.$ADGroupProperty.Name
+                        $_DGroupName = $_ADGroup.Name
                     }
                 } else {
                     $_DGroupName = $_ADGroup.$ADGroupProperty
@@ -553,6 +571,26 @@ function Remove-PermissionsDistributionGroup {
 
         }
     }    
+}
+
+function Test-Office365Loaded {
+    [CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="objects")]
+	Param(
+        [Switch] $WarningOnFalse,
+        [Switch] $ErrorOnFalse
+    )
+    $warning = ""
+    $answer = ((Get-Command Get-DistributionGroup).Count -gt 0)
+    if ($answer -eq $false) {
+        if ($ErrorOnFalse) {
+            Write-Error $warning
+            Break
+        }
+        if ($WarningOnFalse) {
+            Write-Warning $warning
+        }
+    }
+    return $answer
 }
 
 Export-ModuleMember -Function "New-SharedMailbox","Sync-SharedMailboxAutoMapping","Add-SharedMailboxGroup", "New-PermissionsDistributionGroup", "Sync-PermissionsDistributionGroup", "Remove-PermissionsDistributionGroup" #TODO "Verb-Noun"
