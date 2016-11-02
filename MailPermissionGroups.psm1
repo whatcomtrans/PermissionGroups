@@ -325,7 +325,7 @@ function Sync-PermissionsDistributionGroup {
             forEach ($_ADGroup in $_PermissionGroups) {
                 if (!$UseADGroupProperty) {
                     if ($ADGroupPrefix) {
-                        $_DGroupName = $_ADGroup.Nameping.Replace($ADGroupPrefix, "")
+                        $_DGroupName = ($_ADGroup.Name).Replace($ADGroupPrefix, "")
                     } else {
                         $_DGroupName = $_ADGroup.Name
                     }
@@ -497,7 +497,7 @@ function Remove-PermissionsDistributionGroup {
             forEach ($_ADGroup in $_PermissionGroups) {
                 if (!$UseADGroupProperty) {
                     if ($ADGroupPrefix) {
-                        $_DGroupName = $_ADGroup.Name.Replace($ADGroupPrefix, "")
+                        $_DGroupName = ($_ADGroup.Name).Replace($ADGroupPrefix, "")
                     } else {
                         $_DGroupName = $_ADGroup.Name
                     }
@@ -589,8 +589,9 @@ function Test-Office365Loaded {
         if ($WarningOnFalse) {
             Write-Warning $warning
         }
+    } else {
+        return $answer
     }
-    return $answer
 }
 
 Export-ModuleMember -Function "New-SharedMailbox","Sync-SharedMailboxAutoMapping","Add-SharedMailboxGroup", "New-PermissionsDistributionGroup", "Sync-PermissionsDistributionGroup", "Remove-PermissionsDistributionGroup", "Test-Office365Loaded" #TODO "Verb-Noun"
