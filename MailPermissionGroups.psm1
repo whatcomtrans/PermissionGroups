@@ -390,7 +390,7 @@ function Sync-PermissionsDistributionGroup {
         }
 
         forEach ($_pair in $_pairs) {
-            Write-Verbose $_pair
+            #Write-Verbose $_pair
             
             $_PermissionGroup = $_pair.pgroup
             $_DistributionGroup = $_pair.dgroup
@@ -585,9 +585,10 @@ function Test-Office365Loaded {
         if ($ErrorOnFalse) {
             Write-Error $warning
             Break
-        }
-        if ($WarningOnFalse) {
+        } elseif ($WarningOnFalse) {
             Write-Warning $warning
+        } else {
+            return $answer
         }
     } else {
         return $answer
