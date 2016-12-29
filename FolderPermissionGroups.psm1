@@ -20,7 +20,9 @@ function Add-FolderPermissions {
 		[Parameter(Mandatory=$false,Position=4,HelpMessage="Determine how inheritance of this rule is propagated to child objects.  Values are None, NoPropagateInherit and InheritOnly or some combination of these values in a comma seperated string.  Default is None.  See http://msdn.microsoft.com/en-us/magazine/cc163885.aspx#S3")] 
             [String]$PropagationFlags="None",
 		[Parameter(Mandatory=$false,Position=5,HelpMessage="Whether to Allow or Deny the permission, defaults to Allow")] [ValidateSet("Allow","Deny")] 
-            [String]$Grant="Allow"
+            [String]$Grant="Allow",
+        [Parameter(Mandatory=$false,Position=6,HelpMessage="An existing ACL object to modify")]
+            $ACLObject
 	)
 	Begin {
 		switch ($Permission) {
@@ -62,15 +64,21 @@ function Add-FolderPermissions {
         if ($_object) {
 		    Write-Verbose "Retrieving ACL for $Path"
 		    #[System.Security.AccessControl] $acl = Get-Acl -Path $Path
-            $acl = Get-Acl -Path $Path
+            if (!$ACLObject) {
+                $acl = Get-Acl -Path $Path
+            } else {
+                $acl = $ACLObject
+            }
 		    #$acl.SetAccessRuleProtection($True, $False)
 		    Write-Verbose "Adding new rule to ACL"
 		    [System.Security.AccessControl.FileSystemAccessRule] $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($_object.SID ,$_FileSystemRights, $InheritanceFlags, $PropagationFlags, $Grant)
 		    $acl.AddAccessRule($rule)
 		    Write-Verbose "Setting ACL for $Path to modified ACL"
 		    Set-Acl $Path $acl
-        } else {
             
+            return $acl
+        } else {
+            return $null
         }
 	}
 }
@@ -207,4 +215,107 @@ function Get-FolderPermissionsGroupOrphans {
 	}
 }
 
-Export-ModuleMember -Function "Add-FolderPermissions", "Get-FolderPermissionsGroupName", "New-FolderPermissionsGroup", "Set-FolderPermissionsOU", "Get-FolderPermissionsOU", "Get-FolderPermissionsGroupOrphans", "Add-FolderPermissionsGroup"
+function Update-FolderPermissionGroups {
+	[CmdletBinding(SupportsShouldProcess=$true)]
+	Param(
+		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=1,HelpMessage="Path to set permission on.")] 
+            [String]$Path,
+   		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=2,HelpMessage="OU (complete path) to place newly created Folder Permissions Groups in.")] 
+            [String]$OU,
+		[Parameter(Mandatory=$false,ValueFromPipeline=$true,Position=3,HelpMessage="A hash table of path prefixs to be replaced with a friendly names in the group name.  Often used to replace a share UNC path with a friendly name.  Example, \\server\share = Users")] 
+            [System.Collections.Hashtable]$PathCommonNames,
+        [Parameter(Mandatory=$false,ValueFromPipeline=$false,Position=4,HelpMessage="Recursively process sub-folders?")]
+            [Switch] $Recurse,
+        [Parameter(Mandatory=$false,ValueFromPipeline=$false,Position=5,HelpMessage="Leave the existing rights acl rule in place, otherwise it removes them.")]
+            [Switch] $NoRemove
+	)
+	Process {
+
+        [String[]] $results = @()
+
+        [Boolean] $MadeChange = $false
+
+        # check folder permissions
+        $acl = Get-Acl -Path $Path
+
+        # If permissions exist
+        $AccessToMove = $acl.Access | where -Property IsInherited -eq -Value $false | where -Property IdentityReference -NE -Value "CREATOR OWNER" | where -Property IdentityReference -NE -Value "BUILTIN\Administrators" | where -Property IdentityReference -NE -Value "NT AUTHORITY\SYSTEM" | where -Property IdentityReference -NotLike "WHATCOMTRANS\FLDR*"
+        $AccessFLDR = $acl.Access | where -Property IsInherited -eq -Value $false | where -Property IdentityReference -Like "WHATCOMTRANS\FLDR*"
+        if ($AccessFLDR.Count -gt 0) {
+            [String []] $ExistingADGroups = ($AccessFLDR.IdentityReference.ToString().Split("\")[1])
+        } else {
+            [String []] $ExistingADGroups = @()
+        }
+
+        #   Get permission type
+        ForEach ($Access in $AccessToMove) {
+            $Rights = ($Access.FileSystemRights.ToString()).split(",").Trim() | where -FilterScript {$_ -ne "Synchronize"}
+            $NeededADGroupName = FolderPermissionsGroupName -Permission (Get-RightsShortName -Right $Rights) -Path $Path -PathCommonNames $PathCommonNames
+            if ($access.IdentityReference.Value -eq "BUILTIN\Users") {
+                $member = Get-ADGroup "All-Users"    #This is a WTA hack
+            } else {
+                $LDAPFilter = "(samaccountname=$($Access.IdentityReference.Value.Split("\")[1]))"
+                $member = (Get-ADObject -LDAPFilter $LDAPFilter ).DistinguishedName
+            }
+            if ($NeededADGroupName -icontains $ExistingADGroups) {
+                # Move existing permissions into the group
+                Add-ADGroupMember -Identity $NeededADGroupName -Members $member
+            } else {
+                #   If group with permission type does not aleady exist
+                #   create a group the permisson
+
+                $Permission = (Get-RightsShortName $Rights)
+                [Microsoft.ActiveDirectory.Management.ADGroup] $_group = New-FolderPermissionsGroup -Permission $Permission -Path $Path -OU $OU -PathCommonNames $PathCommonNames
+                
+                #   Set folder permissions using group
+                $acl = Add-FolderPermissions -Permission $Permission -Path $Path -AssignedTo $_group.SAMAccountName -ACLObject $acl
+
+                #   Add member
+                $_group | Add-ADGroupMember -Members $member
+            }
+            
+            if (!$NoRemove) {
+                #   Remove ACL entry
+                $acl.RemoveAccessRule($Access)           
+            }
+
+            $MadeChange = $true
+        }
+        #Update the ACL if needed
+        if ($MadeChange) {
+            Set-Acl $Path $acl
+            $results += $Path
+        }
+
+        if ($Recurse) {
+            # For each child folder, call this method recursively
+            Get-ChildItem -Path $Path -Directory | %{
+                $results += Update-FolderPermissionGroups -Path ($_.FullName) -OU $OU -PathCommonNames $PathCommonNames -Recurse
+            }
+        }
+
+        return $results
+    }
+}
+
+function Get-RightsShortName {
+    [CmdletBinding(SupportsShouldProcess=$false)]
+    param (
+        [System.Security.AccessControl.FileSystemRights] $Right
+    )
+    switch ($Right) {
+        "Modify" {
+            return "RW"
+            break
+        }
+        "ReadAndExecute" {
+            return "RO"
+        }
+        default {
+            return $Right
+        }
+    }
+}
+
+
+Export-ModuleMember -Function "Add-FolderPermissions", "Get-FolderPermissionsGroupName", "New-FolderPermissionsGroup", "Set-FolderPermissionsOU", "Get-FolderPermissionsOU", "Get-FolderPermissionsGroupOrphans", "Add-FolderPermissionsGroup", "Update-FolderPermissionGroups"
