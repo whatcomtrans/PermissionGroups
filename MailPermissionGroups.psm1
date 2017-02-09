@@ -401,8 +401,8 @@ function Sync-PermissionsDistributionGroup {
 
             #Gather members
             #TODO - Only supports USER objects, need to determine type of object returned by Get-ADGroupMember and get the right user.
-            $_PermissionGroupMembers = Get-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Recursive:$Flatten | Get-ADUser -Properties "mailNickname"
-            $_DistributionGroupMembers = Get-DistributionGroupMember -Identity $_DistributionGroup.Identity | Add-Member -MemberType AliasProperty -Name "mailNickname" -Value "Alias" -PassThru
+            $_PermissionGroupMembers = (Get-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Recursive:$Flatten | Get-ADUser).UserPrincipalName
+            $_DistributionGroupMembers = (Get-DistributionGroupMember -Identity $_DistributionGroup.Identity | Where RecipientType -eq UserMailbox | Get-Mailbox).UserPrincipalName
 
             #Preform compare
             if (!$ReverseDirection) {
@@ -413,21 +413,19 @@ function Sync-PermissionsDistributionGroup {
                     $_Removemember = $_DistributionGroupMembers
                     $_Addmember = @()
                 } else {
-                    $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers -Property "mailNickname" -IncludeEqual -PassThru
-                    $_Addmember = $_results | where -Property SideIndicator -EQ -Value "<="
-                    $_Removemember = $_results | where -Property SideIndicator -EQ -Value "=>"
+                    $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers -Property "UserPrincipalName" -IncludeEqual -PassThru
+                    $_Addmember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "<=")
+                    $_Removemember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "=>")
                 }
 
                 #Handle Adds
                 if ($_Addmember) {
-                    $_Addmember = $_Addmember.mailNickname
-                    $_AddMember | Add-DistributionGroupMember -Identity $_DistributionGroup.Identity
+                    $_Addmember| %{Add-DistributionGroupMember -Identity $_DistributionGroup.Identity -Member (($_ | Get-Mailbox).DistinguishedName)}
                 }
 
                 #Handle Removes
                 if ($_Removemember) {
-                    $_Removemember = $_Removemember.mailNickname
-                    $_Removemember | Remove-DistributionGroupMember -Identity $_DistributionGroup.Identity
+                    $_Removemember | %{Remove-DistributionGroupMember -Identity $_DistributionGroup.Identity -Member (($_ | Get-Mailbox).DistinguishedName)}
                 }
             } else {
                 if (!$_DistributionGroupMembers) {
@@ -437,21 +435,19 @@ function Sync-PermissionsDistributionGroup {
                     $_Removemember = @()
                     $_Addmember = $_DistributionGroupMembers
                 } else {
-                    $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers -Property "mailNickname" -IncludeEqual -PassThru
-                    $_Addmember = $_results | where -Property SideIndicator -EQ -Value "=>"
-                    $_Removemember = $_results | where -Property SideIndicator -EQ -Value "<="
+                    $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers -Property "UserPrincipalName" -IncludeEqual -PassThru
+                    $_Addmember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "=>")
+                    $_Removemember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "<=")
                 }
 
                 #Handle Adds
                 if ($_Addmember) {
-                    $_Addmember = $_Addmember.UserPrincipalName
-                    Add-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Members ($_Addmember | Get-ADUser)
+                    $_Addmember | %{Get-ADUser -Filter "UserPrincipalName -eq '$($_)'"} | Add-ADGroupMember -Identity $_PermissionGroup.DistinguishedName
                 }
 
                 #Handle Removes
                 if ($_Removemember) {
-                    $_Removemember = $_Removemember.UserPrincipalName
-                    Remove-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Members ($_Removemember | Get-ADUser)
+                    $_Removemember | %{Get-ADUser -Filter "UserPrincipalName -eq '$($_)'"} | Remove-ADGroupMember -Identity $_PermissionGroup.DistinguishedName
                 }
             }
         }
