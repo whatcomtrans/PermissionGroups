@@ -401,8 +401,8 @@ function Sync-PermissionsDistributionGroup {
 
             #Gather members
             #TODO - Only supports USER objects, need to determine type of object returned by Get-ADGroupMember and get the right user.
-            $_PermissionGroupMembers = (Get-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Recursive:$Flatten | Get-ADUser).UserPrincipalName
-            $_DistributionGroupMembers = (Get-DistributionGroupMember -Identity $_DistributionGroup.Identity | Where RecipientType -eq UserMailbox | Get-Mailbox).UserPrincipalName
+            $_PermissionGroupMembers = (Get-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Recursive:$Flatten | Get-ADUser).UserPrincipalName.Trim().ToLower()
+            $_DistributionGroupMembers = (Get-DistributionGroupMember -Identity $_DistributionGroup.Identity | Where RecipientType -eq UserMailbox | Get-Mailbox).UserPrincipalName.Trim().ToLower()
 
             #Preform compare
             if (!$ReverseDirection) {
@@ -413,9 +413,9 @@ function Sync-PermissionsDistributionGroup {
                     $_Removemember = $_DistributionGroupMembers
                     $_Addmember = @()
                 } else {
-                    $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers -Property "UserPrincipalName" -IncludeEqual -PassThru
-                    $_Addmember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "<=")
-                    $_Removemember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "=>")
+                    $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers
+                    $_Addmember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "<=").InputObject
+                    $_Removemember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "=>").InputObject
                 }
 
                 #Handle Adds
@@ -425,7 +425,7 @@ function Sync-PermissionsDistributionGroup {
 
                 #Handle Removes
                 if ($_Removemember) {
-                    $_Removemember | %{Remove-DistributionGroupMember -Identity $_DistributionGroup.Identity -Member (($_ | Get-Mailbox).DistinguishedName)}
+                    $_Removemember | %{Remove-DistributionGroupMember -Identity $_DistributionGroup.Identity -Member (($_ | Get-Mailbox).DistinguishedName) -Confirm:$false}
                 }
             } else {
                 if (!$_DistributionGroupMembers) {
@@ -435,9 +435,9 @@ function Sync-PermissionsDistributionGroup {
                     $_Removemember = @()
                     $_Addmember = $_DistributionGroupMembers
                 } else {
-                    $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers -Property "UserPrincipalName" -IncludeEqual -PassThru
-                    $_Addmember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "=>")
-                    $_Removemember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "<=")
+                    $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers
+                    $_Addmember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "=>").InputObject
+                    $_Removemember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "<=").InputObject
                 }
 
                 #Handle Adds
