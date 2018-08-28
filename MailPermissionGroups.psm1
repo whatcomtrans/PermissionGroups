@@ -203,6 +203,31 @@ function Add-SharedMailboxGroup {
 	}
 }
 
+# Expand a group to include all users from all contianing groups
+function Expand-SharedMailboxGroup {
+    [CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="Identity")]
+	Param(
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipelineByPropertyName=$True,HelpMessage="Mailbox Identity",ParameterSetName="Identity")] 
+            [String]$Identity,
+        [Parameter(Mandatory=$true,Position=0,HelpMessage="The OU where the permissions groups will be created",ParameterSetName="OU")] 
+            [String]$PermissionsOU,
+        [Parameter(Mandatory=$false,Position=1,HelpMessage="Name filter to use, defaults to 'Name -like SHMB-*'",ParameterSetName="OU")] 
+            [String]$Filter = "Name -like 'SHMB-*'"
+	)
+	Begin {
+        Test-Office365Loaded -ErrorOnFalse
+    }
+    Process {
+        If (!$PermissionsOU) { #Use Identity
+            Add-ADGroupMember -Identity $Identity -Members (Get-ADGroupMember -Identity $Identity -Recursive)
+        } else { #Use OU
+            forEach ($_group in (Get-ADGroup -Filter $Filter -SearchBase $PermissionsOU -SearchScope Subtree)) {
+                Add-ADGroupMember -Identity $_group -Members (Get-ADGroupMember -Identity $_group -Recursive)
+            }
+        }
+    }
+}
+
 function New-PermissionsDistributionGroup {
 	[CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="UseDLName")]
 	Param(
@@ -346,7 +371,7 @@ function Sync-PermissionsDistributionGroup {
                 if ($UseADGroupProperty) { #By using property
                     forEach ($_PGroup in $PermissionGroup) {
                         $_PGroup = $_PGroup | Get-ADGroup -Properties $ADGroupProperty
-                        $_DGroup = Get-DistributionGroup -Identity $($_PGroup.$ADGroupProperty)
+                        $_DGroup = Get-DistributionGroup -Identity $($_PGroup.$ADGroupProperty) -RecipientTypeDetails "MailUniversalDistributionGroup"
                         if ($_DGroup) {
                             $_pair = @{"pgroup" = $_PGroup; "dgroup" = $_DGroup}
                             $_pairs.Add($_pair)
@@ -357,7 +382,7 @@ function Sync-PermissionsDistributionGroup {
                 } else { #Attempt to match by name
                     forEach ($_PGroup in $PermissionGroup) {
                         $_DGroupName = $_PGroup.Name.Replace($ADGroupPrefix, "")
-                        $_DGroup = Get-DistributionGroup -Identity $_DGroupName -ErrorAction SilentlyContinue
+                        $_DGroup = Get-DistributionGroup -Identity $_DGroupName -RecipientTypeDetails "MailUniversalDistributionGroup" -ErrorAction SilentlyContinue
                         if ($_DGroup) {
                             $_pair = @{"pgroup" = $_PGroup; "dgroup" = $_DGroup}
                             $_pairs.Add($_pair)
@@ -401,8 +426,8 @@ function Sync-PermissionsDistributionGroup {
 
             #Gather members
             #TODO - Only supports USER objects, need to determine type of object returned by Get-ADGroupMember and get the right user.
-            $_PermissionGroupMembers = (Get-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Recursive:$Flatten | Get-ADUser).UserPrincipalName.Trim().ToLower()
-            $_DistributionGroupMembers = (Get-DistributionGroupMember -Identity $_DistributionGroup.Identity | Where RecipientType -eq UserMailbox | Get-Mailbox).UserPrincipalName.Trim().ToLower()
+            $_PermissionGroupMembers = (Get-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Recursive:$Flatten | Get-ADUser | Where-Object UserPrincipalName -NE $null).UserPrincipalName.Trim().ToLower()
+            $_DistributionGroupMembers = (Get-DistributionGroupMember -Identity $_DistributionGroup.DistinguishedName | Where RecipientType -eq UserMailbox | Get-Mailbox).UserPrincipalName.Trim().ToLower()
 
             #Preform compare
             if (!$ReverseDirection) {
