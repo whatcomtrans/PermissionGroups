@@ -445,12 +445,12 @@ function Sync-PermissionsDistributionGroup {
 
                 #Handle Adds
                 if ($_Addmember) {
-                    $_Addmember| %{Add-DistributionGroupMember -Identity $_DistributionGroup.Identity -Member (($_ | Get-Mailbox).DistinguishedName)}
+                    $_Addmember| %{Add-DistributionGroupMember -Identity $_DistributionGroup.DistinguishedName -Member (($_ | Get-Mailbox).DistinguishedName)}
                 }
 
                 #Handle Removes
                 if ($_Removemember) {
-                    $_Removemember | %{Remove-DistributionGroupMember -Identity $_DistributionGroup.Identity -Member (($_ | Get-Mailbox).DistinguishedName) -Confirm:$false}
+                    $_Removemember | %{Remove-DistributionGroupMember -Identity $_DistributionGroup.DistinguishedName -Member (($_ | Get-Mailbox).DistinguishedName) -Confirm:$false}
                 }
             } else {
                 if (!$_DistributionGroupMembers) {

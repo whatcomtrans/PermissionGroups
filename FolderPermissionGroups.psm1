@@ -276,7 +276,7 @@ function Update-FolderPermissionGroups {
             
             if (!$NoRemove) {
                 #   Remove ACL entry
-                $acl.RemoveAccessRule($Access)           
+                #$acl.RemoveAccessRule($Access)           
             }
 
             $MadeChange = $true
