@@ -95,4 +95,97 @@ function Get-ADGroupMemberChanges {
 	}
 }
 
+<#
+.SYNOPSIS
+TODO
+
+#>
+function Sync-ADGroupExpanded {
+	[CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="group")]
+	Param(
+		[Parameter(Mandatory=$false,Position=0,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,ParameterSetName="group")]
+		[PSObject]$ExpandedGroup,
+        [Parameter(Mandatory=$false,Position=1,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$true,ParameterSetName="group")]
+        [PSObject]$CompactGroup,
+        [Parameter(Mandatory=$false,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$true,ParameterSetName="OU")]
+        [String]$OU,
+        [Parameter(Mandatory=$false,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$true)]
+        [String]$Prefix="",
+        [Parameter(Mandatory=$false,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$true)]
+        [String]$Postfix = "-Expanded"
+	)
+	Begin {
+        #Put begining stuff here
+	}
+	Process {
+        #Put process here
+        $skip = $false
+        If ($OU) {
+            #TODO - Get all matching groups from an OU and recusively expand them
+            $_filter = "Name -like '$($Prefix)*$($Postfix)'"
+            $ExpandedGroups = Get-ADGroup -Filter $_filter -SearchBase $OU -SearchScope Subtree
+            if ($ExpandedGroups) {
+                $ExpandedGroups | Sync-ADGroupExpanded -Prefix $Prefix -Postfix $Postfix
+            } else {
+                Write-Warning "No matching groups found in OU"
+            }
+        } else  {
+            Try {
+                if (!$ExpandedGroup) {
+                    if ($CompactGroup) {
+                        $_ExpandedGroupIdentity = "$($Prefix)$($CompactGroup.SamAccountName)$($Postfix)"
+                        $ExpandedGroup = Get-ADGroup -Identity $_ExpandedGroupIdentity
+                    } else {
+                        Write-Warning "Must specify either ExpanedGroup or CompactGroup"
+                        $skip = $true
+                    }
+                } elseif (!$CompactGroup) {
+                    if ($ExpandedGroup) {
+                        $CompactGroup = Get-ADGroup -Identity $($CompactGroup.SamAccountName.Replace($Prefix, "").Replace($Postfix, ""))
+                    } else {
+                        Write-Warning "Must specify either ExpanedGroup or CompactGroup"
+                        $skip = $true
+                    }
+                }
+            } catch {
+                Write-Warning "Invalid Groups specified"
+                $skip = $true
+            } 
+
+            if (!$skip) {
+    
+                $CompactGroupMembers = Get-ADGroupMember -Identity $CompactGroup.DistinguishedName -Recursive
+    
+                $ExpandedGroupMembers = Get-ADGroupMember -Identity $ExpandedGroup.DistinguishedName
+
+                $removeMembers = @()
+                $addMembers = @()
+    
+                if (!$ExpandedGroupMembers) {
+                    $addMembers = $CompactGroupMembers
+                } elseif (!$CompactGroupMembers) {
+                    $removeMembers = $ExpandedGroupMembers
+                } else {
+                    $changes = Compare-Object -ReferenceObject $CompactGroupMembers -DifferenceObject $ExpandedGroupMembers
+                    $removeMembers = ($changes | Where SideIndicator -EQ "=>").InputObject
+                    $addMembers = ($changes | Where SideIndicator -EQ "<=").InputObject
+                }
+    
+                #Remove members
+            
+                if ($removeMembers) {
+                    Remove-ADGroupMember -Identity $ExpandedGroup.DistinguishedName -Members $removeMembers
+                }
+                #Add members
+                if ($addMembers) {
+                    Add-ADGroupMember -Identity $ExpandedGroup.DistinguishedName -Members $addMembers
+                }
+            }    
+        }
+	}
+	End {
+        #Put end here
+	}
+}
+
 Export-ModuleMember -Function *
