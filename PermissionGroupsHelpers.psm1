@@ -141,7 +141,14 @@ function Sync-ADGroupExpanded {
                     }
                 } elseif (!$CompactGroup) {
                     if ($ExpandedGroup) {
-                        $CompactGroup = Get-ADGroup -Identity $($ExpandedGroup.SamAccountName.Replace($Prefix, "").Replace($Postfix, ""))
+                        $_CompactGroupIdentity = $ExpandedGroup.SamAccountName
+                        If ($Prefix) {
+                            $_CompactGroupIdentity = $_CompactGroupIdentity.Replace($Prefix, "")
+                        }
+                        If ($Postfix) {
+                            $_CompactGroupIdentity = $_CompactGroupIdentity.Replace($Postfix, "")
+                        }
+                        $CompactGroup = Get-ADGroup -Identity $_CompactGroupIdentity
                     } else {
                         Write-Warning "Must specify either ExpanedGroup or CompactGroup"
                         $skip = $true
