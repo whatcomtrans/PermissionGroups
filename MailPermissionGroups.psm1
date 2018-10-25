@@ -48,11 +48,8 @@ function Sync-SharedMailboxAutoMapping {
     }
     Process {
         #TODO - Modify comparison process to handle access other then FullAccess
-        #TODO - Also, this assumes the only users directly mapped will be AutoMapped
-        #TODO - Add support for confirm and whatif
-        $doConfirm = $false
-        #TODO - I am still not confident I have tested every scenario and until I get the above TODO implemented, all changes REQUIRE confirmation
-        
+
+        $doConfirm = $PSCmdlet.ShouldProcess('Interate group members granted Full Access to shared mailbox $Identity and grant all child members full access with AutoMapping TRUE, syncing changes in membership.')       
         [String[]]$_PermissionGroupUsers = $null
 
         #Step 1:  Get the SHMB groups associated with the mailbox
@@ -63,9 +60,14 @@ function Sync-SharedMailboxAutoMapping {
 
             foreach ($_SHMBGroup in $_SHMBGroups) {
                 #Step 2:  Verify the group is set to AutoMapping by checking description by -like "* AutoMapped *"
-                if ((Get-ADGroup $_SHMBGroup -Properties Description).Description -like "* AutoMapped *") {
-                    #Step 3:  Get the users in the group
-                    $_PermissionGroupUsers += ((Get-ADGroupMember -Identity $_SHMBGroup -Recursive) | Where-Object -Property objectClass -EQ -Value user).SamAccountName
+                Write-Verbose "Checking $_SHMBGroup for matching AD group"
+                if (Test-ADGroup $_SHMBGroup) {
+                    Write-Verbose "Checking $_SHMBGroup for automapping..."
+                    if ((Get-ADGroup $_SHMBGroup -Properties Description).Description -like "* AutoMapped *") {
+                        #Step 3:  Get the users in the group
+                        Write-Verbose "Group $_SHMBGroup should be automapped, retrieving members..."
+                        $_PermissionGroupUsers += ((Get-ADGroupMember -Identity $_SHMBGroup -Recursive) | Where-Object -Property objectClass -EQ -Value user).SamAccountName
+                    }
                 }
             }
 
@@ -106,6 +108,93 @@ function Sync-SharedMailboxAutoMapping {
 	}
 }
 
+function Sync-MailboxPermissionsGroup {
+
+    [CmdletBinding(SupportsShouldProcess=$true)]
+	Param(
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipelineByPropertyName=$True,HelpMessage="Mailbox Identity")] 
+        [Object]$Identity,
+        [Parameter(Mandatory=$true,Position=1,HelpMessage="AD Group Identity to expand and assign ")] 
+        [Object[]] $ADGroupToExpandAndSync,
+        [Parameter(Mandatory=$false,Position=2,HelpMessage="See Add-MailboxPermission BUT you can ONLY specify one right at a time")] 
+        [ValidateSet("ChangeOwner", "ChangePermission", "DeleteItem", "ExternalAccount", "FullAccess", "ReadPermission")]
+        [String]$AccessRights = "FullAccess",
+		[Parameter(Mandatory=$false,Position=3,HelpMessage="See Add-MailboxPermission")] 
+        [Switch]$AutoMapping=$true,
+        [Parameter(Mandatory=$false,Position=4,HelpMessage="See Add-MailboxPermission")] 
+        [Switch]$Deny = $false,
+        [Parameter(Mandatory=$false,Position=5,HelpMessage="See Add-MailboxPermission")] 
+        [Switch]$IgnoreDefaultScope = $false,
+        [Parameter(Mandatory=$false,Position=6,HelpMessage="See Add-MailboxPermission")] 
+        [ValidateSet("None","All", "Children", "Descendents", "SelfAndChildren")]
+        [String]$InheritanceType = "None",
+        [Parameter(Mandatory=$false,Position=7,HelpMessage="Also grant SendAs permission.")] 
+        [Switch]$GrantSendAs
+	)
+	Begin {
+        Test-Office365Loaded -ErrorOnFalse
+    }
+    Process {
+        #Sync the membership of the ADGroupIdentiy(s) with the members of mailbox Identity, granting Permissions and setting AutoMapping, ignoring groups
+
+        $_confirm = $false
+        if ($Confirm) {$_confirm = $Confirm}
+
+        #Verify ADGroupToExpandAndSync groups exists and expand membership returning UserPrincipalName
+        $_GroupMembers = @()
+        ForEach($_GroupIdenity in $ADGroupToExpandAndSync) {
+            If (Test-ADGroup -Identity $_GroupIdenity) {
+                $_GroupMembers += Get-ADGroupMember -Identity $_GroupIdenity -Recursive | Get-ADUser -Property UserPrincipalName
+            }
+        }
+
+        #Get Identity and retrieve existing membership, filtering by AccessRights and users ONLY
+        $_mbPermissions = Get-MailboxPermission $Identity | Where-Object -Property IsInherited -EQ -Value $false | Where-Object -Property AccessRights -Contains $AccessRights | Where-Object -Property User -Like "*@*" | Add-Member -MemberType AliasProperty -Name "UserPrincipalName" -Value "User"  -PassThru
+
+        #Compare and determine delta
+        if ($_mbPermissions -and $_GroupMembers) {
+            $_results = Compare-Object -ReferenceObject $_mbPermissions -DifferenceObject $_GroupMembers -Property UserPrincipalName
+            $_add = ($_results | Where-Object -Property SideIndicator -EQ "=>").UserPrincipalName
+            $_remove = ($_results | Where-Object -Property SideIndicator -EQ "<=").UserPrincipalName
+        } elseif($_mbPermissions) {
+            $_add = @()
+            $_remove = $_mbPermissions.UserPrincipalName
+        } else {
+            $_add = $_GroupMembers.UserPrincipalName
+            $_remove = @()
+        }
+
+        #Add-MailboxPermission
+        If ($_add) {
+            ForEach($_UserIdentity in $_add) {
+                Try {
+                    Add-MailboxPermission -Identity $Identity -User $_UserIdentity -AccessRights $AccessRights -InheritanceType $InheritanceType -AutoMapping:$AutoMapping -Deny:$Deny -IgnoreDefaultScope:$IgnoreDefaultScope -Confirm:$_confirm
+                    if ($GrantSendAs) {
+                        Add-RecipientPermission $Identity -AccessRights SendAs -Trustee $_UserIdentity -Confirm:$_confirm
+                    }
+                } Catch {
+                    Write-Verbose "Error adding user $_UserIdentity, probably no matching Exchange identity"  #TODO add checking for Exchange identity
+                }
+            }
+        }
+
+        #Remove-MailboxPermission
+        If ($_remove) {
+            ForEach($_UserIdentity in $_remove) {
+                Try {
+                    Remove-MailboxPermission -Identity $Identity -User $_UserIdentity -AccessRights $AccessRights -InheritanceType $InheritanceType -Deny:$Deny -IgnoreDefaultScope:$IgnoreDefaultScope -Confirm:$_confirm
+                    if ($GrantSendAs) {
+                        Remove-RecipientPermission $Identity -AccessRights SendAs -Trustee $_UserIdentity -Confirm:$_confirm
+                    }
+                } Catch {
+                    Write-Verbose "Error removing user $_UserIdentity, probably no matching Exchange identity"  #TODO add checking for Exchange identity
+                }
+            }
+        }
+
+	}
+}
+
 function Add-SharedMailboxGroup {
 	[CmdletBinding(SupportsShouldProcess=$true)]
 	Param(
@@ -117,10 +206,10 @@ function Add-SharedMailboxGroup {
             [Switch]$AutoMapping = $true,
         [Parameter(Mandatory=$false,Position=3,HelpMessage="Optional array of members to add (accepts same objects as Add-ADGroupMember)")] 
             [Object[]] $Members,
-        [Parameter(Mandatory=$true,Position=4,HelpMessage="The OU where the permissions groups will be created")] 
-            [String]$PermissionsOU = "",
-        [Parameter(Mandatory=$false,Position=5,HelpMessage="If using DirSync, specify the computername where it runs")] 
-            [String]$DirSyncHost = ""
+        [Parameter(Mandatory=$false,Position=4,HelpMessage="Also grant SendAs permission.")] 
+            [Switch]$GrantSendAs=$true,
+        [Parameter(Mandatory=$true,Position=5,HelpMessage="The OU where the permissions groups will be created")] 
+            [String]$PermissionsOU = ""
 	)
 	Begin {
         Test-Office365Loaded -ErrorOnFalse
@@ -128,6 +217,7 @@ function Add-SharedMailboxGroup {
     Process {
         #TODO - Add support for confirm and whatif
         $doConfirm = $false
+        if ($Confirm) {$doConfirm = $Confirm}
         
         $cleanIdentity = $Identity.Replace(' ', '_')
 
@@ -141,91 +231,18 @@ function Add-SharedMailboxGroup {
 
         #Create security group
         $_GroupDescription = "Users and groups have FullAccess and SendAs permissions to the shared mailbox: $Identity .  $_AutoMapIdicator"
-        [Microsoft.ActiveDirectory.Management.ADGroup]$_newGroup = New-ADGroup -Path $PermissionsOU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description $_GroupDescription -GroupScope Global -PassThru
-
-        #Allow time for the change to sync in AD
-        Sleep 60
-
-        #Force directory sync.  Only run if DirSyncHost defined.  This allows this module to work with or without Office365 dirsync.
-        if ($DirSyncHost.Length -ge 1) {
-            Force-DirSync -ComputerName $DirSyncHost
-            #Allow time for the change to sync in Office365
-            Sleep 60
-        }
-
-        #Get mailbox so I can get email address for distribution group
-        [String] $EmailDomain = (((Get-Mailbox $Identity).PrimarySMTPAddress).Split('@'))[1]
-
-        #Change security group to distribution group
-        Enable-SecurityGroupAsDistributionGroup -Identity $_PermissionGroup -DisplayName $_PermissionGroup -EmailAddress "$_PermissionGroup@$EmailDomain" -Hide -Confirm:$doConfirm
-
-        #Allow time for the change to sync in AD
-        Sleep 60
-
-        #Force directory sync.  Only run if DirSyncHost defined.  This allows this module to work with or without Office365 dirsync.
-        if ($DirSyncHost.Length -ge 1) {
-            Force-DirSync -ComputerName $DirSyncHost
-            #Allow time for the change to sync in Office365
-            Sleep 60
-        }
-
-        Sleep 120
-
-        #Assign the security group the fullAccess permission to access the shared mailbox
-        Add-MailboxPermission -Identity $Identity -User $_PermissionGroup -AccessRights $Permissions -AutoMapping:$_AutoMapping -Confirm:$doConfirm
-
-        If ($Permissions -eq "FullAccess") { 
-            #Assign the security gorup the SendAs permission to the shared mailbox
-            Add-RecipientPermission -Identity $Identity -Trustee $_PermissionGroup -AccessRights SendAs -Confirm:$doConfirm
-        }
+        [Microsoft.ActiveDirectory.Management.ADGroup]$_newGroup = New-ADGroup -Path $PermissionsOU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description $_GroupDescription -GroupScope Global -PassThru -Confirm:$doConfirm
 
         if ($Members) {
             #Add members to the group
             $_newGroup | Add-ADGroupMember -Members $Members
-            
-            #Allow time for the change to sync in AD
-            Sleep 30
-
-            #Force directory sync.  Only run if DirSyncHost defined.  This allows this module to work with or without Office365 dirsync.
-            if ($DirSyncHost.Length -ge 1) {
-                Force-DirSync -ComputerName $DirSyncHost
-                #Allow time for the change to sync in Office365
-                Sleep 60
-            }
-
-            if ($_AutoMapping) {
-                Sync-SharedMailboxAutoMapping $Identity
-            }
         }
+
+        Sync-MailboxPermissionsGroup -Identity $Identity -ADGroupToExpandAndSync $_newGroup.DistinguishedName -AccessRights $AccessRights -AutoMapping:$AutoMapping -GrantSendAs:$GrantSendAs -Confirm:$doConfirm
 
         return $_newGroup
         #Done
 	}
-}
-
-# Expand a group to include all users from all contianing groups
-function Expand-SharedMailboxGroup {
-    [CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="Identity")]
-	Param(
-		[Parameter(Mandatory=$true,Position=0,ValueFromPipelineByPropertyName=$True,HelpMessage="Mailbox Identity",ParameterSetName="Identity")] 
-            [String]$Identity,
-        [Parameter(Mandatory=$true,Position=0,HelpMessage="The OU where the permissions groups will be created",ParameterSetName="OU")] 
-            [String]$PermissionsOU,
-        [Parameter(Mandatory=$false,Position=1,HelpMessage="Name filter to use, defaults to 'Name -like SHMB-*'",ParameterSetName="OU")] 
-            [String]$Filter = "Name -like 'SHMB-*'"
-	)
-	Begin {
-        Test-Office365Loaded -ErrorOnFalse
-    }
-    Process {
-        If (!$PermissionsOU) { #Use Identity
-            Add-ADGroupMember -Identity $Identity -Members (Get-ADGroupMember -Identity $Identity -Recursive)
-        } else { #Use OU
-            forEach ($_group in (Get-ADGroup -Filter $Filter -SearchBase $PermissionsOU -SearchScope Subtree)) {
-                Add-ADGroupMember -Identity $_group -Members (Get-ADGroupMember -Identity $_group -Recursive)
-            }
-        }
-    }
 }
 
 function New-PermissionsDistributionGroup {
@@ -275,7 +292,7 @@ function New-PermissionsDistributionGroup {
             #Create the Permission Group
             [Microsoft.ActiveDirectory.Management.ADGroup]$PermissionGroup = New-ADGroup -Path $OU -Name $_PermissionGroup -SamAccountName $_PermissionGroup -Description $_GroupDescription -GroupScope Global -PassThru
             
-            Sleep -Seconds 2
+            Start-Sleep -Seconds 2
 
             #Add Members to the Permission Group
             if ($Members) {
@@ -318,7 +335,7 @@ function Sync-PermissionsDistributionGroup {
         [Parameter(ParameterSetName="MatchOnName")]
             [PSObject[]]$DistributionGroup,
         [Parameter(Mandatory=$true,ValueFromPipeline=$true,ParameterSetName="OU",HelpMessage="The OU where the permissions groups can be found.  All will be synced.")] 
-            [String]$OU = "",
+            [String]$OU,
         [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'.  Only needed if matching on Name.")] 
         [Parameter(ParameterSetName="MatchOnName")]
             [String]$ADGroupPrefix = "EL-",
@@ -427,7 +444,7 @@ function Sync-PermissionsDistributionGroup {
             #Gather members
             #TODO - Only supports USER objects, need to determine type of object returned by Get-ADGroupMember and get the right user.
             $_PermissionGroupMembers = (Get-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Recursive:$Flatten | Get-ADUser | Where-Object UserPrincipalName -NE $null).UserPrincipalName.Trim().ToLower()
-            $_DistributionGroupMembers = (Get-DistributionGroupMember -Identity $_DistributionGroup.DistinguishedName | Where RecipientType -eq UserMailbox | Get-Mailbox).UserPrincipalName.Trim().ToLower()
+            $_DistributionGroupMembers = (Get-DistributionGroupMember -Identity $_DistributionGroup.DistinguishedName | Where-Object RecipientType -eq UserMailbox | Get-Mailbox).UserPrincipalName.Trim().ToLower()
 
             #Preform compare
             if (!$ReverseDirection) {
@@ -439,18 +456,18 @@ function Sync-PermissionsDistributionGroup {
                     $_Addmember = @()
                 } else {
                     $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers
-                    $_Addmember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "<=").InputObject
-                    $_Removemember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "=>").InputObject
+                    $_Addmember = [String[]] ($_results | Where-Object -Property SideIndicator -EQ -Value "<=").InputObject
+                    $_Removemember = [String[]] ($_results | Where-Object -Property SideIndicator -EQ -Value "=>").InputObject
                 }
 
                 #Handle Adds
                 if ($_Addmember) {
-                    $_Addmember| %{Add-DistributionGroupMember -Identity $_DistributionGroup.DistinguishedName -Member (($_ | Get-Mailbox).DistinguishedName)}
+                    $_Addmember| ForEach-Object {Add-DistributionGroupMember -Identity $_DistributionGroup.DistinguishedName -Member (($_ | Get-Mailbox).DistinguishedName)}
                 }
 
                 #Handle Removes
                 if ($_Removemember) {
-                    $_Removemember | %{Remove-DistributionGroupMember -Identity $_DistributionGroup.DistinguishedName -Member (($_ | Get-Mailbox).DistinguishedName) -Confirm:$false}
+                    $_Removemember | ForEach-Object {Remove-DistributionGroupMember -Identity $_DistributionGroup.DistinguishedName -Member (($_ | Get-Mailbox).DistinguishedName) -Confirm:$false}
                 }
             } else {
                 if (!$_DistributionGroupMembers) {
@@ -461,18 +478,18 @@ function Sync-PermissionsDistributionGroup {
                     $_Addmember = $_DistributionGroupMembers
                 } else {
                     $_results = Compare-Object -ReferenceObject $_PermissionGroupMembers -DifferenceObject $_DistributionGroupMembers
-                    $_Addmember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "=>").InputObject
-                    $_Removemember = [String[]] ($_results | where -Property SideIndicator -EQ -Value "<=").InputObject
+                    $_Addmember = [String[]] ($_results | Where-Object -Property SideIndicator -EQ -Value "=>").InputObject
+                    $_Removemember = [String[]] ($_results | Where-Object -Property SideIndicator -EQ -Value "<=").InputObject
                 }
 
                 #Handle Adds
                 if ($_Addmember) {
-                    $_Addmember | %{Get-ADUser -Filter "UserPrincipalName -eq '$($_)'"} | Add-ADGroupMember -Identity $_PermissionGroup.DistinguishedName
+                    $_Addmember | ForEach-Object {Get-ADUser -Filter "UserPrincipalName -eq '$($_)'"} | Add-ADGroupMember -Identity $_PermissionGroup.DistinguishedName
                 }
 
                 #Handle Removes
                 if ($_Removemember) {
-                    $_Removemember | %{Get-ADUser -Filter "UserPrincipalName -eq '$($_)'"} | Remove-ADGroupMember -Identity $_PermissionGroup.DistinguishedName
+                    $_Removemember | ForEach-Object {Get-ADUser -Filter "UserPrincipalName -eq '$($_)'"} | Remove-ADGroupMember -Identity $_PermissionGroup.DistinguishedName
                 }
             }
         }
@@ -490,7 +507,7 @@ function Remove-PermissionsDistributionGroup {
         [Parameter(ParameterSetName="MatchOnName")]
             [PSObject[]]$DistributionGroup,
         [Parameter(Mandatory=$true,ValueFromPipeline=$true,ParameterSetName="OU",HelpMessage="The OU where the permissions groups can be found.  All will be synced.")] 
-            [String]$OU = "",
+            [String]$OU,
         [Parameter(Mandatory=$false,ParameterSetName="OU",HelpMessage="A prefix that exists on the ADGroup but not on the DistributionGroup name.  Defaults to 'EL-'.  Only needed if matching on Name.")] 
         [Parameter(ParameterSetName="MatchOnName")]
             [String]$ADGroupPrefix = "EL-",
@@ -595,7 +612,7 @@ function Remove-PermissionsDistributionGroup {
 }
 
 function Test-Office365Loaded {
-    [CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="objects")]
+    [CmdletBinding()]
 	Param(
         [Switch] $WarningOnFalse,
         [Switch] $ErrorOnFalse

@@ -81,7 +81,7 @@ function Get-ADGroupMemberChanges {
             if (!$NoSave) {
                 $newValues | Export-Clixml $filePath
             }
-            $asHashTable = @{Add = ($results | Where-Object -Property Change -EQ -Value Add | %{Get-ADUser -Identity $_.SID}); Remove = ($results | Where-Object -Property Change -EQ -Value Remove | %{Get-ADUser -Identity $_.SID})}
+            $asHashTable = @{Add = ($results | Where-Object -Property Change -EQ -Value Add | ForEach-Object {Get-ADUser -Identity $_.SID}); Remove = ($results | Where-Object -Property Change -EQ -Value Remove | ForEach-Object {Get-ADUser -Identity $_.SID})}
             return $asHashTable
         } else {
             #Initial data set
@@ -94,6 +94,33 @@ function Get-ADGroupMemberChanges {
         #Put end here
 	}
 }
+
+function Test-ADGroup {
+	[CmdletBinding(SupportsShouldProcess=$false)]
+	Param(
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+		[String]$Identity
+	)
+	Begin {
+        #Put begining stuff here
+	}
+	Process {
+        #Put process here
+        $_groupExists = $false
+        try {
+            if (Get-ADGroup $Identity) {
+                $_groupExists = $true
+            }
+        } catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+            $_groupExists = $false
+        }
+        return $_groupExists
+	}
+	End {
+        #Put end here
+	}
+}
+
 
 <#
 .SYNOPSIS
@@ -174,8 +201,8 @@ function Sync-ADGroupExpanded {
                     $removeMembers = $ExpandedGroupMembers
                 } else {
                     $changes = Compare-Object -ReferenceObject $CompactGroupMembers -DifferenceObject $ExpandedGroupMembers
-                    $removeMembers = ($changes | Where SideIndicator -EQ "=>").InputObject
-                    $addMembers = ($changes | Where SideIndicator -EQ "<=").InputObject
+                    $removeMembers = ($changes | Where-Object SideIndicator -EQ "=>").InputObject
+                    $addMembers = ($changes | Where-Object SideIndicator -EQ "<=").InputObject
                 }
     
                 #Remove members
