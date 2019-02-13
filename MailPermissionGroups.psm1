@@ -633,4 +633,4 @@ function Test-Office365Loaded {
     }
 }
 
-Export-ModuleMember -Function "New-SharedMailbox","Sync-SharedMailboxAutoMapping","Add-SharedMailboxGroup", "New-PermissionsDistributionGroup", "Sync-PermissionsDistributionGroup", "Remove-PermissionsDistributionGroup", "Test-Office365Loaded" #TODO "Verb-Noun"
+Export-ModuleMember -Function "New-SharedMailbox","Sync-SharedMailboxAutoMapping","Sync-MailboxPermissionsGroup","Add-SharedMailboxGroup", "New-PermissionsDistributionGroup", "Sync-PermissionsDistributionGroup", "Remove-PermissionsDistributionGroup", "Test-Office365Loaded" #TODO "Verb-Noun"
