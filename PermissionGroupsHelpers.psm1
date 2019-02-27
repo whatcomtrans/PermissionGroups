@@ -222,4 +222,108 @@ function Sync-ADGroupExpanded {
 	}
 }
 
+<#
+.SYNOPSIS
+Removes from a specific user all groups from MemberOf.
+Default leaves Domain Users but use the parameter ExceptGroup to change the group to leave or set to empty string to remove all groups.
+
+#>
+function Remove-ADUserMemberships {
+	[CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="user")]
+	Param(
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$false,ParameterSetName="user")]
+		[Object] $Identity,
+        [Parameter(Mandatory=$false,Position=1,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$false,ParameterSetName="user")]
+        [String] $ExceptGroup = "Domain Users"
+	)
+	Process {
+        $alias = ($Identity | Get-ADUser).DistinguishedName
+        Get-ADPrincipalGroupMembership -Identity $alias| where {$_.Name -notlike $ExceptGroup} |% {Remove-ADPrincipalGroupMembership -Identity $alias -MemberOf $_ -Confirm:$false}
+	}
+}
+
+function Move-ADGroupsFromUsersToGroup {
+	[CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="objects")]
+	Param(
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,ParameterSetName="objects")]
+		[Microsoft.ActiveDirectory.Management.ADGroup] $Group,
+                [Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,ParameterSetName="names")]
+                [String] $Name,
+                [Parameter(Mandatory=$false,Position=1)]
+                [Microsoft.ActiveDirectory.Management.ADGroup[]] $GroupsToMove
+	)
+	Begin {
+        #Put begining stuff here
+	}
+	Process {
+        #If just passed name, get group
+        if (!$Group) {
+            $Group = Get-ADGroup -Identity $Name
+        }
+
+        [Microsoft.ActiveDirectory.Management.ADPrincipal[]] $Users = Get-ADGroupMember -Identity $Group
+
+        #If not passed a list of groups to move, ask for them from the first user
+        if (!$GroupsToMove) {
+            $GroupsToMove = Get-ADPrincipalGroupMembership -Identity $Users[0] | Out-GridView -Title "Select Groups from $($Users[0].Name) to Move from Users to $($Group.Name)" -OutputMode Multiple
+        }
+
+        $GroupsToMove | %{Add-ADGroupMember -Identity $_ -Members $Group}
+        $GroupsToMove | %{Remove-ADGroupMember -Identity $_ -Members $Users}
+
+	}
+	End {
+        #Put end here
+	}
+}
+
+function Set-ADUserPrimaryGroup {
+	[CmdletBinding(SupportsShouldProcess=$true,DefaultParameterSetName="user")]
+	Param(
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$false,ParameterSetName="user")]
+		[Object] $Identity,
+        [Parameter(Mandatory=$true,Position=1,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$false,ParameterSetName="user")]
+        [Object] $Group
+
+	)
+	Process {
+        $Identity = ($Identity | Get-ADUser -Properties *)
+        $Group = ($Group | Get-ADGroup)
+
+        #Verify it is not already their primary group
+        if ($Identity.PrimaryGroup -ne $Group.DistinguishedName) {
+
+            #Verify group is already a member, if not, add it
+            if ($Identity.MemberOf -notcontains $Group.DistinguishedName) {
+                Add-ADPrincipalGroupMembership -Identity $Identity.DistinguishedName -MemberOf $Group
+            }
+
+            $groupSID = $Group.SID
+            $groupRID = $groupSID.Value.Replace($groupSID.AccountDomainSid, "").Replace("-", "")
+
+            Set-ADObject -Identity $Identity.DistinguishedName -Replace @{PrimaryGroupID=$groupRID}
+        }
+	}
+}
+
+function Get-GroupMembershipRecursive {
+    [CmdletBinding(SupportsShouldProcess=$false,DefaultParameterSetName="example")]
+	Param(
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,HelpMessage="Identity of Group, same as Get-ADPrincipalGroupMembership")]
+		[Object]$Identity
+	)
+    Process {
+        $retGroups = @()
+        $groups = Get-ADPrincipalGroupMembership $Identity
+        $retGroups += $groups
+        if ($groups) {
+            foreach ($group in $groups) {
+                $retGroups += (Get-GroupMembershipRecursive $group)
+            }
+        }
+        return $retGroups
+    }
+}
+
+
 Export-ModuleMember -Function *
