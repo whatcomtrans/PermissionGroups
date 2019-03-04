@@ -139,7 +139,9 @@ function Sync-ADGroupExpanded {
         [Parameter(Mandatory=$false,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$true)]
         [String]$Prefix="",
         [Parameter(Mandatory=$false,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$true)]
-        [String]$Postfix = "-Expanded"
+        [String]$Postfix = "-Expanded",
+        [Parameter(Mandatory=$false,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$false)]
+        [Switch]$ReturnIssueFix
 	)
 	Begin {
         #Put begining stuff here
@@ -148,11 +150,11 @@ function Sync-ADGroupExpanded {
         #Put process here
         $skip = $false
         If ($OU) {
-            #TODO - Get all matching groups from an OU and recusively expand them
+            #Get all matching groups from an OU and recusively expand them
             $_filter = "Name -like '$($Prefix)*$($Postfix)'"
             $ExpandedGroups = Get-ADGroup -Filter $_filter -SearchBase $OU -SearchScope Subtree
             if ($ExpandedGroups) {
-                $ExpandedGroups | Sync-ADGroupExpanded -Prefix $Prefix -Postfix $Postfix
+                $ExpandedGroups | Sync-ADGroupExpanded -Prefix $Prefix -Postfix $Postfix -ReturnIssueFix:$ReturnIssueFix
             } else {
                 Write-Warning "No matching groups found in OU"
             }
@@ -206,13 +208,25 @@ function Sync-ADGroupExpanded {
                 }
     
                 #Remove members
-            
                 if ($removeMembers) {
-                    Remove-ADGroupMember -Identity $ExpandedGroup.DistinguishedName -Members $removeMembers
+                    if ($ReturnIssueFix) {
+                        ForEach ($removeMember in $removeMembers) {
+                            Write-Output (New-IssueFix -FixCommandString "Remove-ADGroupMember -Identity '$($ExpandedGroup.DistinguishedName)' -Members '$($removeMember.DistinguishedName)'" -FixDescription "Remove $($removeMember.SamAccountName) from EXPANDED group: $($ExpandedGroup.SamAccountName)")
+                        }
+                    } else {
+                        Remove-ADGroupMember -Identity $ExpandedGroup.DistinguishedName -Members $removeMembers
+                    }
                 }
+
                 #Add members
                 if ($addMembers) {
-                    Add-ADGroupMember -Identity $ExpandedGroup.DistinguishedName -Members $addMembers
+                    if ($ReturnIssueFix) {
+                        ForEach ($addMember in $addMembers) {
+                            Write-Output (New-IssueFix -FixCommandString "Add-ADGroupMember -Identity '$($ExpandedGroup.DistinguishedName)' -Members '$($addMember.DistinguishedName)'" -FixDescription "Add $($addMember.SamAccountName) to EXPANDED group: $($ExpandedGroup.SamAccountName)")
+                        }
+                    } else {
+                        Add-ADGroupMember -Identity $ExpandedGroup.DistinguishedName -Members $addMembers
+                    }
                 }
             }    
         }
@@ -234,11 +248,19 @@ function Remove-ADUserMemberships {
 		[Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$false,ParameterSetName="user")]
 		[Object] $Identity,
         [Parameter(Mandatory=$false,Position=1,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$false,ParameterSetName="user")]
-        [String] $ExceptGroup = "Domain Users"
+        [String] $ExceptGroup = "Domain Users",
+        [Parameter(Mandatory=$false,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$false)]
+        [Switch]$ReturnIssueFix
 	)
 	Process {
         $alias = ($Identity | Get-ADUser).DistinguishedName
-        Get-ADPrincipalGroupMembership -Identity $alias| where {$_.Name -notlike $ExceptGroup} |% {Remove-ADPrincipalGroupMembership -Identity $alias -MemberOf $_ -Confirm:$false}
+        Get-ADPrincipalGroupMembership -Identity $alias| where {$_.Name -notlike $ExceptGroup} |% {
+            if ($ReturnIssueFix) {
+                Write-Output (New-IssueFix -FixCommandString "Remove-ADPrincipalGroupMembership -Identity '$alias' -MemberOf '$($_.DistinguishedName)'" -FixDescription "Removing from user $alias group $($_.samaccountname)")
+            } else {
+                Remove-ADPrincipalGroupMembership -Identity $alias -MemberOf $_
+            }
+        }
 	}
 }
 
@@ -283,8 +305,9 @@ function Set-ADUserPrimaryGroup {
 		[Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$false,ParameterSetName="user")]
 		[Object] $Identity,
         [Parameter(Mandatory=$true,Position=1,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$false,ParameterSetName="user")]
-        [Object] $Group
-
+        [Object] $Group,
+        [Parameter(Mandatory=$false,ValueFromPipeline=$false,ValueFromPipelineByPropertyName=$false)]
+        [Switch]$ReturnIssueFix
 	)
 	Process {
         $Identity = ($Identity | Get-ADUser -Properties *)
@@ -301,7 +324,11 @@ function Set-ADUserPrimaryGroup {
             $groupSID = $Group.SID
             $groupRID = $groupSID.Value.Replace($groupSID.AccountDomainSid, "").Replace("-", "")
 
-            Set-ADObject -Identity $Identity.DistinguishedName -Replace @{PrimaryGroupID=$groupRID}
+            if ($ReturnIssueFix) {
+                Write-Output (New-IssueFix -FixCommandString "Set-ADObject -Identity '$($Identity.DistinguishedName)' -Replace @{PrimaryGroupID=$groupRID}" -FixDescription "For user $($Identity.SamAccountName) setting primary group to $($Group.samaccountname)")
+            } else {
+                Set-ADObject -Identity $Identity.DistinguishedName -Replace @{PrimaryGroupID=$groupRID}
+            }
         }
 	}
 }
