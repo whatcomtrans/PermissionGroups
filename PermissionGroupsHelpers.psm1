@@ -352,5 +352,38 @@ function Get-GroupMembershipRecursive {
     }
 }
 
+function Copy-ADGroup {
+    [CmdletBinding(SupportsShouldProcess=$false,DefaultParameterSetName="example")]
+	Param(
+		[Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,HelpMessage="Identity of Group, same as Get-ADPrincipalGroupMembership")]
+        [Object]$Identity,
+        [Parameter(Mandatory=$true,Position=1,ValueFromPipeline=$false,HelpMessage="New Identity of Group, same as Get-ADPrincipalGroupMembership")]
+        [String]$NewName,
+        [Parameter(Mandatory=$false,Position=2,ValueFromPipeline=$false,HelpMessage="Skip copy of group members")]
+        [Switch]$SkipMembers,
+        [Parameter(Mandatory=$false,Position=3,ValueFromPipeline=$false,HelpMessage="Skip copy of MemberOf")]
+        [Switch]$SkipMembersOf
+	)
+    Process {
+        #Get group to copy
+        $toCopy = Get-ADGroup -Identity $Identity -Properties *
+        $OUpath = (([adsi]"LDAP://$($toCopy.DistinguishedName)").Parent).Substring(7)
+
+        #Create new group, using the toCopy as a template
+        $newGroup = Get-ADGroup -Identity $Identity -Properties * | New-ADGroup -Name $NewName -SamAccountName $NewName -Path $OUpath -PassThru
+
+        #Copy all Group Members
+        if (!$SkipMembers) {
+            Add-ADGroupMember -Identity $newGroup.DistinguishedName -Members $toCopy.Members
+        }
+
+        #Copy all Group MemberOf
+        if (!$SkipMemberOf) {
+            Add-ADPrincipalGroupMembership -Identity $newGroup.DistinguishedName -MemberOf $toCopy.MemberOf
+        }
+
+        Write-Output $newGroup
+    }
+}
 
 Export-ModuleMember -Function *
