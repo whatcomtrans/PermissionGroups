@@ -40,6 +40,29 @@ function Get-RoleADGroup {
 	}
 }
 
+<#
+This cmdlet is used for changing a user's role.  It ASSUMES that as user should have only one ROLE of the TYPE (OU) provided in the NewRole parameter.
+The function identifies the OU of the NewRole AD Group.  It then adds the new group to the Identity user as a Member Of
+
+AND
+
+removes all other AD groups from the user Member Of that match the same OU as the NewRole AD Group.
+#>
+function Swap-RoleADGroup {
+	[CmdletBinding(SupportsShouldProcess=$true)]
+	Param(
+        [Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,HelpMessage="Identity of User to swap roles on.")]
+		[String]$Identity,
+        [Parameter(Mandatory=$true,Position=1,ValueFromPipelineByPropertyName=$true,HelpMessage="The Identity of the new role group to assign the user to.")]
+		[String]$NewRole
+	)
+	Process {
+        $NewRoleGroup = Get-ADGroup -Identity $NewRole
+        $New
+	}
+}
+
+
 
 function Get-RolePositionGroup {
     [CmdletBinding(SupportsShouldProcess=$false,DefaultParameterSetName="OU")]
