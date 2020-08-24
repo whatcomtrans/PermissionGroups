@@ -346,9 +346,7 @@ function Sync-PermissionsDistributionGroup {
         [Parameter(ParameterSetName="UseProperty")]
             [String]$ADGroupProperty = "info",
         [Parameter(Mandatory=$false,HelpMessage="Default syncs ADGroup to DistributionGroup, this reverse the sync direction.")] 
-            [Switch] $ReverseDirection,
-        [Parameter(Mandatory=$false,HelpMessage="Default will get all ADGroup members recursevly and adds them individually, this will add as is.")] 
-            [Switch] $DoNotFlatten
+            [Switch] $ReverseDirection
 	)
 	Begin {
         Test-Office365Loaded -ErrorOnFalse
@@ -438,11 +436,11 @@ function Sync-PermissionsDistributionGroup {
             $_DistributionGroup = $_pair.dgroup
 
             $Flatten = $true
-            #TODO Fix flatten by fixing the TODO below
-            #if ($DoNotFlatten) { $Flatten = $false}
 
             #Gather members
-            #TODO - Only supports USER objects, need to determine type of object returned by Get-ADGroupMember and get the right user.
+            #Only supports USER objects, need to determine type of object returned by Get-ADGroupMember and get the right user.
+            $_PermissionGroupMembers = @() # Prevent leakage of previouse results
+            $_DistributionGroupMembers = @() # Prevent leakage of previouse results
             $_PermissionGroupMembers = (Get-ADGroupMember -Identity $_PermissionGroup.DistinguishedName -Recursive:$Flatten | Get-ADUser | Where-Object UserPrincipalName -NE $null).UserPrincipalName.Trim().ToLower()
             $_DistributionGroupMembers = (Get-DistributionGroupMember -Identity $_DistributionGroup.DistinguishedName | Where-Object RecipientType -eq UserMailbox | Get-Mailbox).UserPrincipalName.Trim().ToLower()
 
