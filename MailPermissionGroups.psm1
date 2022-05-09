@@ -11,9 +11,7 @@ function New-SharedMailbox {
         [Parameter(Mandatory=$false, ValueFromPipeline=$true, Position=4,HelpMessage="Optional array of members to add (accepts same objects as Add-ADGroupMember)")] 
             [Object[]] $Members,
         [Parameter(Mandatory=$true,Position=5,HelpMessage="The OU where the permissions groups will be created")] 
-            [String]$PermissionsOU = "",
-        [Parameter(Mandatory=$false,Position=6,HelpMessage="If using DirSync, specify the computername where it runs")] 
-            [String]$DirSyncHost = ""
+            [String]$PermissionsOU = ""
 	)
     Begin {
         Test-Office365Loaded -ErrorOnFalse
@@ -28,9 +26,9 @@ function New-SharedMailbox {
 
         #Create and associate group
         if (!$Members) {
-            return (Add-SharedMailboxGroup -Identity $Name -Permissions "FullAccess" -AutoMapping:$AutoMapping -PermissionsOU $PermissionsOU -DirSyncHost $DirSyncHost) #TODO - Need to add additional parameters
+            return (Add-SharedMailboxGroup -Identity $Name -Permissions "FullAccess" -AutoMapping:$AutoMapping -PermissionsOU $PermissionsOU) #TODO - Need to add additional parameters
         } else {
-            return (Add-SharedMailboxGroup -Identity $Name -Permissions "FullAccess" -AutoMapping:$AutoMapping -Members $Members -PermissionsOU $PermissionsOU -DirSyncHost $DirSyncHost) #TODO - Need to add additional parameters
+            return (Add-SharedMailboxGroup -Identity $Name -Permissions "FullAccess" -AutoMapping:$AutoMapping -Members $Members -PermissionsOU $PermissionsOU) #TODO - Need to add additional parameters
         }
 
         #Done

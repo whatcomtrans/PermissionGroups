@@ -395,6 +395,10 @@ function Copy-ADGroup {
         #Create new group, using the toCopy as a template
         $newGroup = Get-ADGroup -Identity $Identity -Properties * | New-ADGroup -Name $NewName -SamAccountName $NewName -Path $OUpath -PassThru
 
+        Start-Sleep -Seconds 5
+
+        $newGroup = Get-ADGroup -Identity $newGroup.DistinguishedName -Properties *
+
         #Copy all Group Members
         if (!$SkipMembers) {
             Add-ADGroupMember -Identity $newGroup.DistinguishedName -Members $toCopy.Members
