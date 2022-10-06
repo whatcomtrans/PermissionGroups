@@ -360,15 +360,17 @@ function Get-GroupMembershipRecursive {
     [CmdletBinding(SupportsShouldProcess=$false,DefaultParameterSetName="example")]
 	Param(
 		[Parameter(Mandatory=$true,Position=0,ValueFromPipeline=$true,HelpMessage="Identity of Group, same as Get-ADPrincipalGroupMembership")]
-		[Object]$Identity
+		[Object] $Identity,
+        [Parameter(Mandatory=$false,Position=1,ValueFromPipeline=$false,HelpMessage="AD Server to use.  Make sure it IsGlobalCatalog and works with Get-ADPrincipalGroupMembership")]
+        [String] $Server
 	)
     Process {
         $retGroups = @()
-        $groups = Get-ADPrincipalGroupMembership $Identity
+        $groups = Get-ADPrincipalGroupMembership -Identity $Identity -Server $Server
         $retGroups += $groups
         if ($groups) {
             foreach ($group in $groups) {
-                $retGroups += (Get-GroupMembershipRecursive $group)
+                $retGroups += (Get-GroupMembershipRecursive -Identity $group -Server $Server)
             }
         }
         return $retGroups
