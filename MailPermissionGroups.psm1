@@ -236,7 +236,7 @@ function Add-SharedMailboxGroup {
             $_newGroup | Add-ADGroupMember -Members $Members
         }
 
-        Sync-MailboxPermissionsGroup -Identity $Identity -ADGroupToExpandAndSync $_newGroup.DistinguishedName -AccessRights $AccessRights -AutoMapping:$AutoMapping -GrantSendAs:$GrantSendAs -Confirm:$doConfirm
+        Sync-MailboxPermissionsGroup -Identity $Identity -ADGroupToExpandAndSync $_newGroup.DistinguishedName -AccessRights $Permissions -AutoMapping:$AutoMapping -GrantSendAs:$GrantSendAs -Confirm:$doConfirm
 
         return $_newGroup
         #Done
